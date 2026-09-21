@@ -1,0 +1,48 @@
+name: Laundrylink
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+  device_preview: ^1.2.0
+  supabase_flutter: ^2.8.0
+  flutter_secure_storage: ^9.2.2
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  http_parser: ^4.0.2
+  shared_preferences: ^2.5.5
+  jwt_decoder: ^2.0.1
+  intl: ^0.20.2
+
+  # NEW — Module A/C: image picker para sa "Upload Proof of Payment /
+  # Screenshot" (booking_payment_page.dart), at "save to gallery" para
+  # sa shop's QR code image.
+  image_picker: ^1.1.2
+  gal: ^2.3.1
+  path_provider: ^2.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1  # Idinagdag para sa pagpapalit ng app icon
+
+flutter:
+  uses-material-design: true
+
+  # Dito inilagay ang assets para mabasa ang iyong mga image files tulad ng logo
+  assets:
+    - assets/images/
+
+# Configuration para mapalitan ang logo ng APK app icon
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/Untitled design.png"
+  min_sdk_android: 21
