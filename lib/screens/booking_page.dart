@@ -3,27 +3,56 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
+import '../models/shop.dart';
 import '../services/api_service.dart';
 import '../services/booking_service.dart';
+import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
-import '../utils/time_utils.dart';
-import '../widgets/booking_status_tracker.dart';
+import '../widgets/collapsible_invoice_card.dart';
+import '../widgets/live_status_banner.dart';
+import '../widgets/order_timeline_tracker.dart';
+import '../widgets/qr_payment_card.dart';
 import 'shop_selection_page.dart';
 
 class BookingPage extends StatelessWidget {
-  const BookingPage({super.key, this.createMode = false});
+  const BookingPage({super.key, this.createMode = false, this.focusBookingId});
 
   final bool createMode;
+  final int? focusBookingId;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.all(20),
-        child: createMode ? const _CreateBookingContent() : const _BookingsContent(),
+        child: createMode
+            ? const _CreateBookingContent()
+            : _BookingsContent(focusBookingId: focusBookingId),
       );
 }
 
+class BookingPageScaffold extends StatelessWidget {
+  const BookingPageScaffold({super.key, this.focusBookingId});
+
+  final int? focusBookingId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        foregroundColor: Colors.black87,
+        title: const Text('Your Bookings', style: TextStyle(fontWeight: FontWeight.w700)),
+      ),
+      body: BookingPage(focusBookingId: focusBookingId),
+    );
+  }
+}
+
 class _BookingsContent extends StatefulWidget {
-  const _BookingsContent();
+  const _BookingsContent({this.focusBookingId});
+
+  final int? focusBookingId;
 
   @override
   State<_BookingsContent> createState() => _BookingsContentState();
@@ -39,6 +68,11 @@ class _BookingsContentState extends State<_BookingsContent> {
   bool _loading = true;
   bool _showAllHistory = false;
   Timer? _pollTimer;
+
+  final Map<int, GlobalKey> _cardKeys = {};
+  bool _hasHandledFocus = false;
+
+  GlobalKey _keyFor(int bookingId) => _cardKeys.putIfAbsent(bookingId, () => GlobalKey());
 
   @override
   void initState() {
@@ -68,6 +102,7 @@ class _BookingsContentState extends State<_BookingsContent> {
         _loading = false;
         _error = null;
       });
+      _handleFocusIfNeeded();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -81,6 +116,24 @@ class _BookingsContentState extends State<_BookingsContent> {
         if (!silent || _bookings == null) _error = 'Unable to load your bookings.';
       });
     }
+  }
+
+  void _handleFocusIfNeeded() {
+    if (_hasHandledFocus || widget.focusBookingId == null) return;
+    _hasHandledFocus = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _cardKeys[widget.focusBookingId];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOut,
+          alignment: 0.05,
+        );
+      }
+    });
   }
 
   @override
@@ -139,20 +192,25 @@ class _BookingsContentState extends State<_BookingsContent> {
         children: [
           if (active.isNotEmpty) ...[
             for (final booking in active) ...[
-              _BookingCard(booking: booking, onCancelled: () => _load(silent: true)),
-              const SizedBox(height: 14),
+              _BookingCard(
+                key: booking.id != null ? _keyFor(booking.id!) : null,
+                booking: booking,
+                onRefresh: () => _load(silent: true),
+              ),
+              const SizedBox(height: 16),
             ],
           ],
           if (history.isNotEmpty) ...[
             if (active.isNotEmpty) const SizedBox(height: 6),
-            Text(
-              'Booking history',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: colors.textSecondary),
-            ),
+            Text('Booking history', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: colors.textSecondary)),
             const SizedBox(height: 12),
             for (final booking in visibleHistory) ...[
-              _BookingCard(booking: booking, onCancelled: () => _load(silent: true)),
-              const SizedBox(height: 14),
+              _BookingCard(
+                key: booking.id != null ? _keyFor(booking.id!) : null,
+                booking: booking,
+                onRefresh: () => _load(silent: true),
+              ),
+              const SizedBox(height: 16),
             ],
             if (hasMoreHistory)
               Center(
@@ -172,10 +230,15 @@ class _BookingsContentState extends State<_BookingsContent> {
   }
 }
 
+/// Isang booking card, ngayon nasa TOP / MID / BOTTOM na disenyo:
+///   TOP    — LiveStatusBanner (+ payment section kung Awaiting Payment)
+///   MID    — OrderTimelineTracker (buong vertical stepper)
+///   BOTTOM — CollapsibleInvoiceCard, at hiwalay na Cancel button
 class _BookingCard extends StatefulWidget {
-  const _BookingCard({required this.booking, required this.onCancelled});
+  const _BookingCard({super.key, required this.booking, required this.onRefresh});
+
   final Booking booking;
-  final VoidCallback onCancelled;
+  final VoidCallback onRefresh;
 
   @override
   State<_BookingCard> createState() => _BookingCardState();
@@ -186,8 +249,10 @@ class _BookingCardState extends State<_BookingCard> {
   bool _cancelling = false;
 
   bool get _isCancellable =>
-      widget.booking.status == BookingStatus.awaitingApproval ||
-      widget.booking.status == BookingStatus.pending;
+      widget.booking.status == BookingStatus.awaitingApproval || widget.booking.status == BookingStatus.pending;
+
+  bool get _needsPaymentAction =>
+      widget.booking.status == BookingStatus.awaitingPayment && widget.booking.paymentStatus != 'paid';
 
   Future<void> _confirmAndCancel() async {
     final colors = context.colors;
@@ -201,10 +266,7 @@ class _BookingCardState extends State<_BookingCard> {
           'This action cannot be undone.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Keep booking'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Keep booking')),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: TextButton.styleFrom(foregroundColor: colors.error),
@@ -220,15 +282,13 @@ class _BookingCardState extends State<_BookingCard> {
     try {
       await _bookingService.cancelBooking(widget.booking.id!);
       if (!mounted) return;
-      widget.onCancelled();
+      widget.onRefresh();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: const Text('Booking cancelled.'), backgroundColor: colors.neutral),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: colors.error),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: colors.error));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -247,105 +307,123 @@ class _BookingCardState extends State<_BookingCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        BookingStatusTracker(booking: booking),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: colors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (booking.totalPrice != null)
-                _DetailRow(label: 'Total', value: '₱${booking.totalPrice!.toStringAsFixed(0)}'),
-              if (booking.weight != null && booking.weight! > 0)
-                _DetailRow(label: 'Weight', value: '${booking.weight!.toStringAsFixed(1)} kg'),
-              if (booking.loads != null && booking.loads! > 0)
-                _DetailRow(label: 'Loads', value: '${booking.loads}'),
-              if (booking.fulfillmentMode != null)
-                _DetailRow(
-                  label: 'Fulfillment',
-                  value: booking.fulfillmentMode == 'delivery' ? 'Delivery' : 'Drop-off',
-                ),
-              if (booking.pickupDatetime != null)
-                _DetailRow(
-                  label: 'Pickup',
-                  value: '${booking.pickupDatetime!.month}/${booking.pickupDatetime!.day} '
-                      '${booking.pickupDatetime!.hour.toString().padLeft(2, '0')}:'
-                      '${booking.pickupDatetime!.minute.toString().padLeft(2, '0')}',
-                ),
-              if (booking.promoCode != null)
-                _DetailRow(label: 'Promo', value: '${booking.promoCode} (-₱${booking.discountAmount?.toStringAsFixed(0) ?? '0'})'),
-              if (booking.specialInstructions != null && booking.specialInstructions!.trim().isNotEmpty)
-                _DetailRow(label: 'Notes', value: booking.specialInstructions!),
-              if (booking.status == BookingStatus.declined && booking.declineReason != null)
-                _DetailRow(label: 'Reason', value: booking.declineReason!),
-              if (booking.bookingTimestamp != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Booked ${formatTimeAgo(booking.bookingTimestamp)}',
-                    style: TextStyle(fontSize: 11, color: colors.textMuted, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              if (_isCancellable) ...[
-                const SizedBox(height: 12),
-                Divider(height: 1, color: colors.border),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _cancelling ? null : _confirmAndCancel,
-                    icon: _cancelling
-                        ? SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: colors.error),
-                          )
-                        : const Icon(Icons.close_rounded, size: 16),
-                    label: Text(_cancelling ? 'Cancelling...' : 'Cancel booking'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: colors.error,
-                      side: BorderSide(color: colors.errorBorder),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+        // TOP — Hero tag matches BookingConfirmationPage's check-circle.
+        Hero(
+          tag: 'booking-${booking.id}-header',
+          child: Material(
+            color: Colors.transparent,
+            child: LiveStatusBanner(booking: booking),
           ),
         ),
+
+        if (_needsPaymentAction) ...[
+          const SizedBox(height: 14),
+          _ShopQrPaymentSection(booking: booking, onUpdated: widget.onRefresh),
+        ],
+
+        const SizedBox(height: 14),
+
+        // MID — full vertical timeline.
+        OrderTimelineTracker(booking: booking),
+
+        const SizedBox(height: 14),
+
+        // BOTTOM — collapsible invoice.
+        CollapsibleInvoiceCard(booking: booking),
+
+        if (_isCancellable) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _cancelling ? null : _confirmAndCancel,
+              icon: _cancelling
+                  ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: colors.error))
+                  : const Icon(Icons.close_rounded, size: 16),
+              label: Text(_cancelling ? 'Cancelling...' : 'Cancel booking'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.error,
+                side: BorderSide(color: colors.errorBorder),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
-  final String label;
-  final String value;
+/// Kinukuha lang yung shop (para sa QR image), tapos ipinapasa papunta
+/// kay QrPaymentCard.
+class _ShopQrPaymentSection extends StatefulWidget {
+  const _ShopQrPaymentSection({required this.booking, required this.onUpdated});
+
+  final Booking booking;
+  final VoidCallback onUpdated;
+
+  @override
+  State<_ShopQrPaymentSection> createState() => _ShopQrPaymentSectionState();
+}
+
+class _ShopQrPaymentSectionState extends State<_ShopQrPaymentSection> {
+  Shop? _shop;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadShop();
+  }
+
+  Future<void> _loadShop() async {
+    final shopId = widget.booking.shopId;
+    if (shopId == null) {
+      setState(() {
+        _loading = false;
+        _error = 'Missing shop reference for this booking.';
+      });
+      return;
+    }
+    try {
+      final shop = await ShopService().getShopDetail(shopId);
+      if (!mounted) return;
+      setState(() {
+        _shop = shop;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = "Unable to load the shop's QR code right now.";
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 90,
-            child: Text(label, style: TextStyle(fontSize: 12.5, color: colors.textSecondary, fontWeight: FontWeight.w600)),
-          ),
-          Expanded(
-            child: Text(value, style: TextStyle(fontSize: 12.5, color: colors.textPrimary, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
+
+    if (_loading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Text(_error!, style: TextStyle(fontSize: 12, color: colors.textMuted));
+    }
+
+    return QrPaymentCard(
+      booking: widget.booking,
+      qrCodeUrl: _shop?.qrCodeUrl,
+      onSubmitted: widget.onUpdated,
     );
   }
 }
@@ -367,10 +445,7 @@ class _CreateBookingContent extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         FilledButton.icon(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ShopSelectionPage()),
-          ),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ShopSelectionPage())),
           icon: const Icon(Icons.storefront_outlined),
           label: const Text('Browse shops'),
           style: FilledButton.styleFrom(

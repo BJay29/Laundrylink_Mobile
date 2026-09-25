@@ -15,17 +15,35 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+/// UPDATED (bug fix) — pinalitan ang _TapScale para gumamit ng Listener
+/// (raw pointer lang, hindi tap-gesture recognizer) sa halip na
+/// GestureDetector.onTap. Dating pattern: outer GestureDetector may
+/// onTap: _login, habang inner FilledButton naka onPressed: () {}
+/// (walang laman) — nagkaka-conflict sa gesture arena kaya minsan
+/// hindi na-cclick ang button. Ngayon, ang FilledButton mismo ang may
+/// totoong onPressed: _login; ang Listener ay para lang sa visual
+/// "press down" scale effect. Walang binago sa validation/auth logic.
+class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   late final _email = TextEditingController(text: widget.prefilledEmail ?? '');
   final _password = TextEditingController();
   bool _hidePassword = true;
   bool _loading = false;
 
+  late final AnimationController _entrance;
+
+  @override
+  void initState() {
+    super.initState();
+    _entrance = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+    _entrance.forward();
+  }
+
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _entrance.dispose();
     super.dispose();
   }
 
@@ -50,7 +68,7 @@ class _LoginPageState extends State<LoginPage> {
       final customer = await AuthService().login(_email.text.trim(), _password.text);
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => MainNavPage(customer: customer)),
+          _fadeSlideRoute(MainNavPage(customer: customer)),
           (route) => false,
         );
       }
@@ -74,6 +92,26 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Animation<double> _fadeFor(double start, double end) => CurvedAnimation(
+        parent: _entrance,
+        curve: Interval(start, end, curve: Curves.easeOutCubic),
+      );
+
+  Widget _staggered({required double start, required double end, required Widget child}) {
+    final fade = _fadeFor(start, end);
+    return AnimatedBuilder(
+      animation: fade,
+      builder: (context, _) => Opacity(
+        opacity: fade.value.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, (1 - fade.value) * 14),
+          child: child,
+        ),
+      ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -84,73 +122,153 @@ class _LoginPageState extends State<LoginPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Welcome back',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: colors.textPrimary),
+            _staggered(
+              start: 0.0,
+              end: 0.5,
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colors.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      'Welcome back',
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: colors.textPrimary),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'Sign in to manage your laundry with ease.',
-              style: TextStyle(color: colors.textSecondary),
+            _staggered(
+              start: 0.05,
+              end: 0.55,
+              child: Text(
+                'Sign in to manage your laundry with ease.',
+                style: TextStyle(color: colors.textSecondary),
+              ),
             ),
             const SizedBox(height: 28),
-            AppTextField(
-              controller: _email,
-              label: 'Email address *',
-              icon: Icons.mail_outline,
-              keyboardType: TextInputType.emailAddress,
-              validator: (v) => v == null || v.trim().isEmpty
-                  ? 'Email address is required'
-                  : !v.contains('@')
-                      ? 'Enter a valid email address'
-                      : null,
+            _staggered(
+              start: 0.15,
+              end: 0.65,
+              child: AppTextField(
+                controller: _email,
+                label: 'Email address *',
+                icon: Icons.mail_outline,
+                keyboardType: TextInputType.emailAddress,
+                validator: (v) => v == null || v.trim().isEmpty
+                    ? 'Email address is required'
+                    : !v.contains('@')
+                        ? 'Enter a valid email address'
+                        : null,
+              ),
             ),
             const SizedBox(height: 16),
-            AppTextField(
-              controller: _password,
-              label: 'Password *',
-              icon: Icons.lock_outline,
-              obscureText: _hidePassword,
-              suffix: IconButton(
-                icon: Icon(_hidePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                onPressed: () => setState(() => _hidePassword = !_hidePassword),
+            _staggered(
+              start: 0.25,
+              end: 0.75,
+              child: AppTextField(
+                controller: _password,
+                label: 'Password *',
+                icon: Icons.lock_outline,
+                obscureText: _hidePassword,
+                suffix: IconButton(
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: RotationTransition(turns: animation, child: child),
+                    ),
+                    child: Icon(
+                      _hidePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      key: ValueKey(_hidePassword),
+                    ),
+                  ),
+                  onPressed: () => setState(() => _hidePassword = !_hidePassword),
+                ),
+                validator: (v) => v == null || v.isEmpty
+                    ? 'Password is required'
+                    : v.length < 6
+                        ? 'Password must be at least 6 characters'
+                        : null,
               ),
-              validator: (v) => v == null || v.isEmpty
-                  ? 'Password is required'
-                  : v.length < 6
-                      ? 'Password must be at least 6 characters'
-                      : null,
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(onPressed: _forgotPassword, child: const Text('Forgot password?')),
+            _staggered(
+              start: 0.3,
+              end: 0.8,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: _forgotPassword, child: const Text('Forgot password?')),
+              ),
             ),
             const SizedBox(height: 8),
-            FilledButton(
-              onPressed: _loading ? null : _login,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-                backgroundColor: colors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            _staggered(
+              start: 0.4,
+              end: 0.9,
+              child: _TapScale(
+                enabled: !_loading,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: colors.primary.withOpacity(_loading ? 0 : 0.30),
+                        blurRadius: 16,
+                        offset: const Offset(0, 7),
+                      ),
+                    ],
+                  ),
+                  child: FilledButton(
+                    // FIX: totoong onPressed dito mismo (_login),
+                    // hindi na empty closure.
+                    onPressed: _loading ? null : _login,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: colors.primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: colors.primary.withOpacity(0.7),
+                      disabledForegroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: _loading
+                          ? const SizedBox(
+                              key: ValueKey('loading'),
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
+                            )
+                          : const Text('Sign in', key: ValueKey('label'), style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
               ),
-              child: _loading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('Sign in'),
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text("Don't have an account?"),
-                TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+            _staggered(
+              start: 0.5,
+              end: 1.0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Don't have an account?"),
+                  TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      _fadeSlideRoute(const RegisterPage()),
+                    ),
+                    child: const Text('Register here'),
                   ),
-                  child: const Text('Register here'),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -158,3 +276,50 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+
+/// FIX: Listener na lang (raw pointer, walang tap-arena participation)
+/// para sa "press down" visual scale. Ang totoong onPressed ay nasa
+/// FilledButton mismo sa loob ng child — kaya wala nang conflict sa
+/// gesture arena.
+class _TapScale extends StatefulWidget {
+  const _TapScale({required this.child, this.enabled = true});
+  final Widget child;
+  final bool enabled;
+
+  @override
+  State<_TapScale> createState() => _TapScaleState();
+}
+
+class _TapScaleState extends State<_TapScale> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) => Listener(
+        onPointerDown: widget.enabled ? (_) => setState(() => _pressed = true) : null,
+        onPointerUp: widget.enabled ? (_) => setState(() => _pressed = false) : null,
+        onPointerCancel: widget.enabled ? (_) => setState(() => _pressed = false) : null,
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
+          child: widget.child,
+        ),
+      );
+}
+
+/// fade + slight upward-slide na page transition.
+Route<T> _fadeSlideRoute<T>(Widget page) => PageRouteBuilder<T>(
+      transitionDuration: const Duration(milliseconds: 320),
+      reverseTransitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );

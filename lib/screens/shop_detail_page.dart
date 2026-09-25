@@ -60,10 +60,6 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
 
           return CustomScrollView(
             slivers: [
-              // Pinasimple mula sa dating flat SliverAppBar na plain
-              // color lang — ngayon may icon at status pill sa loob mismo
-              // ng header, kaya agad makikita ang buod ng shop bago pa
-              // bumaba ang tignan.
               SliverAppBar(
                 backgroundColor: colors.primary,
                 foregroundColor: Colors.white,

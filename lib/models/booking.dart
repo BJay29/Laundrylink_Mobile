@@ -1,14 +1,6 @@
 /// Mirrors the `status` values actually set by the backend (see
 /// app/models.py's Booking.status default + app/controller/
 /// booking_controller.py's transitions).
-///
-/// UPDATED (Weighing / Finalize Pricing feature): added
-/// `awaitingWeighing` ("Awaiting Weighing" — mobile booking accepted by
-/// the shop but not yet weighed/priced) and `awaitingPayment`
-/// ("Awaiting Payment" — price finalized, online payment method,
-/// waiting for the customer to pay/upload proof). Both are real status
-/// strings the backend now sets — see accept_customer_booking() and
-/// finalize_booking_pricing() in booking_controller.py.
 enum BookingStatus {
   awaitingApproval,
   awaitingWeighing,
@@ -48,17 +40,10 @@ extension BookingStatusLabel on BookingStatus {
     }
   }
 
-  /// Kung tapos na ang buong lifecycle ng booking na ito (walang dapat pang
-  /// mangyari) — ginagamit para malaman kung ipapakita pa ba ito bilang
-  /// "active booking" sa Home page.
   bool get isFinal =>
       this == BookingStatus.claimed || this == BookingStatus.cancelled || this == BookingStatus.declined;
 }
 
-/// Converts the backend's raw status string (e.g. "In Progress") into the
-/// matching BookingStatus. Falls back to .unknown for anything unrecognized
-/// instead of throwing — a status the app doesn't know about yet shouldn't
-/// crash the booking list, it should just display generically.
 BookingStatus _statusFromApi(String? raw) {
   switch (raw) {
     case 'Awaiting Approval':
@@ -120,17 +105,20 @@ class Booking {
     this.startedAt,
     this.readyAt,
     this.completedAt,
+    this.estimatedCompletionTime,
+    this.deliveryAddressId,
+    this.deliveryAddressLine,
+    this.deliveryLatitude,
+    this.deliveryLongitude,
+    this.pickupRiderName,
+    this.pickupRiderContact,
+    this.pickupRiderAssignedAt,
+    this.deliveryRiderName,
+    this.deliveryRiderContact,
+    this.deliveryRiderAssignedAt,
   });
 
-  /// Backend Booking.id — null lang para sa mock/placeholder data na wala
-  /// pang totoong record sa database.
   final int? id;
-
-  /// UPDATED: kasama na ngayon ang shop_name sa backend's BookingResponse
-  /// (resolved server-side mula sa Booking.shop relationship — see
-  /// models.py's Booking.shop_name property). fromJson() gagamitin ito
-  /// KUNG NASA response, kung hindi (hal. luma pang cached data), babalik
-  /// sa manually-passed [shopName] parameter bilang fallback.
   final String shopName;
   final String serviceName;
   final BookingStatus status;
@@ -139,7 +127,7 @@ class Booking {
   final double? totalPrice;
   final double? weight;
   final int? loads;
-  final String? fulfillmentMode; // "dropoff" | "delivery"
+  final String? fulfillmentMode;
   final String? specialInstructions;
   final DateTime? pickupDatetime;
   final DateTime? deliveryDatetime;
@@ -149,69 +137,43 @@ class Booking {
   final DateTime? bookingTimestamp;
   final int? washerNumber;
   final int? dryerNumber;
-
-  /// NEW — dahilan kung bakit na-decline ng shop (hal. "Fully booked"),
-  /// null maliban kung status == declined. Ipapakita ito sa History/
-  /// Notifications page para malaman ng customer kung bakit hindi
-  /// natuloy ang kanilang booking.
   final String? declineReason;
 
-  // --- NEW (Payment / Online Payment feature) ---
-  /// "cash" | "cod" | "gcash" | "paymaya"
   final String? paymentMethod;
-
-  /// "unpaid" | "pending_verification" | "paid" | "rejected"
   final String? paymentStatus;
   final DateTime? paidAt;
-
-  /// Public Supabase Storage URL ng na-upload na proof-of-payment
-  /// screenshot. Null hanggang may na-upload.
   final String? proofOfPaymentUrl;
-
-  /// Dahilan kung bakit tinanggihan ng staff ang proof of payment
-  /// (reject_payment() sa booking_controller.py). Null maliban kung
-  /// paymentStatus == "rejected" nang matagal na, o kailangan ulit
-  /// mag-upload ang customer.
   final String? paymentRejectionReason;
 
-  // --- NEW (Weighing / Finalize Pricing feature) ---
-  /// Estimate ng customer sa checkout — hula lang bago pa timbangin.
   final double? estimatedWeight;
   final double? estimatedPrice;
-
-  /// Itinakda ng staff PAGKATAPOS ng aktwal na pagtimbang. Null hanggang
-  /// ma-finalize ng shop (status == awaitingWeighing pa lang).
   final double? finalWeight;
   final double? finalPrice;
-
-  /// Ad-hoc na extra charge (₱) na idinagdag ng staff habang tinitimbang.
   final double? weighingAddonCharges;
-
-  /// Kailan aktwal na na-finalize ng staff ang presyo — ito ang
-  /// timestamp ng "Weighed / Price Ready" step sa order tracking stepper.
   final DateTime? weighedAt;
 
-  // --- NEW (Order Tracking / Live Stepper feature) ---
-  /// Kailan na-create ang booking — timestamp ng "Received" step.
   final DateTime? createdAt;
-
-  /// Kailan naging "In Progress" (naka-assign na ng unang machine) —
-  /// timestamp ng "Washing In Progress" step.
   final DateTime? startedAt;
-
-  /// Kailan naging "Ready" — timestamp ng "Ready for Pickup" step.
   final DateTime? readyAt;
-
-  /// Kailan naging "Claimed" — timestamp ng "Completed / Picked up" step.
   final DateTime? completedAt;
 
-  /// Parses a single booking object from the backend's BookingResponse
-  /// JSON shape. [shopName] is an OPTIONAL fallback — used only when the
-  /// response doesn't carry its own "shop_name" (shouldn't normally
-  /// happen now, but kept for resilience / older cached data). When the
-  /// caller already knows the shop (e.g. right after creating a booking
-  /// from ShopDetailPage), passing it in avoids depending on the network
-  /// round-trip having it.
+  /// NEW — live countdown target, mula sa naka-assign na machine's
+  /// cycle_started_at + remaining_time (backend-computed property).
+  /// Null kung hindi "In Progress" o walang aktibong machine cycle.
+  final DateTime? estimatedCompletionTime;
+
+  final int? deliveryAddressId;
+  final String? deliveryAddressLine;
+  final double? deliveryLatitude;
+  final double? deliveryLongitude;
+
+  final String? pickupRiderName;
+  final String? pickupRiderContact;
+  final DateTime? pickupRiderAssignedAt;
+  final String? deliveryRiderName;
+  final String? deliveryRiderContact;
+  final DateTime? deliveryRiderAssignedAt;
+
   factory Booking.fromJson(Map<String, dynamic> json, {String shopName = ''}) => Booking(
         id: json['id'] as int?,
         shopName: (json['shop_name'] as String?) ?? shopName,
@@ -265,14 +227,26 @@ class Booking {
         completedAt: json['completed_at'] == null
             ? null
             : DateTime.tryParse(json['completed_at'] as String),
+        estimatedCompletionTime: json['estimated_completion_time'] == null
+            ? null
+            : DateTime.tryParse(json['estimated_completion_time'] as String),
+        deliveryAddressId: json['delivery_address_id'] as int?,
+        deliveryAddressLine: json['delivery_address_line'] as String?,
+        deliveryLatitude: (json['delivery_latitude'] as num?)?.toDouble(),
+        deliveryLongitude: (json['delivery_longitude'] as num?)?.toDouble(),
+        pickupRiderName: json['pickup_rider_name'] as String?,
+        pickupRiderContact: json['pickup_rider_contact'] as String?,
+        pickupRiderAssignedAt: json['pickup_rider_assigned_at'] == null
+            ? null
+            : DateTime.tryParse(json['pickup_rider_assigned_at'] as String),
+        deliveryRiderName: json['delivery_rider_name'] as String?,
+        deliveryRiderContact: json['delivery_rider_contact'] as String?,
+        deliveryRiderAssignedAt: json['delivery_rider_assigned_at'] == null
+            ? null
+            : DateTime.tryParse(json['delivery_rider_assigned_at'] as String),
       );
 }
 
-// Temporary mock data — will be replaced with a real API call later.
-//
-// FIX (unnecessary_nullable_for_final_variable_declarations): dating
-// `const Booking? mockActiveBooking` — nullable ang type pero laging may
-// halaga (hindi kailanman null), kaya ini-fix sa non-nullable `Booking`.
 const Booking mockActiveBooking = Booking(
   shopName: 'CleanWave Laundry',
   serviceName: 'Regular Wash',

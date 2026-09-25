@@ -1,3 +1,4 @@
+// ============================= history_page.dart =============================
 import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
@@ -45,6 +46,10 @@ class _HistoryPageState extends State<HistoryPage> {
             return _EmptyState(onRefresh: _reload);
           }
 
+          // FIX: hindi na kailangan ng headerHeight dito — ang header sa
+          // MainNavPage ay hiwalay na row sa itaas ng buong page (hindi na
+          // Positioned/background), kaya normal na top padding lang ang
+          // kailangan para hindi masapawan ang unang item ng listahan.
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView.separated(
@@ -69,7 +74,7 @@ class _EmptyState extends StatelessWidget {
       onRefresh: onRefresh,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(top: 120),
+        padding: const EdgeInsets.only(top: 60),
         children: [
           Icon(Icons.history_rounded, size: 64, color: colors.primaryLight),
           const SizedBox(height: 16),
@@ -93,7 +98,7 @@ class _EmptyState extends StatelessWidget {
 class _ErrorState extends StatelessWidget {
   const _ErrorState({required this.message, required this.onRetry});
   final String message;
-  final Future<void> Function() onRetry;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -214,9 +219,6 @@ class _BookingHistoryCard extends StatelessWidget {
     switch (status) {
       case BookingStatus.awaitingApproval:
         return _StatusStyle(bg: colors.warningBg, fg: colors.warning);
-      // NEW (Weighing / Finalize Pricing feature) — parehong pattern ng
-      // awaitingApproval sa itaas, dahil "hinihintay pa" din ang dalawang
-      // status na ito (staff weighing, o customer payment).
       case BookingStatus.awaitingWeighing:
         return _StatusStyle(bg: colors.warningBg, fg: colors.warning);
       case BookingStatus.awaitingPayment:

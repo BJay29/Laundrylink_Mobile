@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
 import '../models/shop.dart';
-import 'order_tracking_page.dart';
+import 'booking_page.dart';
 
 /// Local color constant — see other screens for the same note on why
 /// this isn't AppColors.primary directly.
@@ -12,13 +12,17 @@ const Color _kPrimary = Color(0xFF1B7A6E);
 /// (POST /bookings/customer succeeds). Sequence:
 ///   1. Brief "Just a moment..." loading state.
 ///   2. "Your booking is confirmed!" with a summary + two actions:
-///      [View Your Bookings] and [Exit].
+///      [Track Your Order] and [Exit].
 ///
-/// UPDATED (spec §2 — STACK ROUTING SEQUENCE): [View Your Bookings]
-/// now clears the navigation stack and pushes straight into
-/// OrderTrackingPage for the newly created booking, using a Hero
-/// transition on the header block (tag must match the one used in
-/// OrderTrackingPage's header — 'booking-{id}-header').
+/// UPDATED (merge Order Tracking into Booking Page): dati ay
+/// "View Your Bookings" ang label, at pumupunta ito sa isang HIWALAY
+/// na OrderTrackingPage. Ngayon "Track Your Order" na ang label, at
+/// diretso na itong pumupunta sa BookingPage mismo (Hero transition
+/// pa rin ang gamit, parehong tag), dahil ang buong order-tracking
+/// timeline/stepper ay NASA LOOB NA ng bawat booking card sa
+/// BookingPage — walang separate na page/route para dito. Pareho pa
+/// rin ang STACK ROUTING SEQUENCE (spec §2): kinakalimutan ang buong
+/// checkout stack (walang "back" pabalik doon).
 class BookingConfirmationPage extends StatefulWidget {
   const BookingConfirmationPage({
     super.key,
@@ -29,9 +33,10 @@ class BookingConfirmationPage extends StatefulWidget {
 
   final Booking booking;
 
-  /// Optional — passed through to OrderTrackingPage so it can render
-  /// the shop's QR code (Shop.qrCodeUrl) without a second network call,
-  /// same reasoning as OrderTrackingPage's own `shop` param.
+  /// Optional — kept for callers that already have the Shop object on
+  /// hand (avoids a second network round trip if a future revision of
+  /// the booking card wants to render shop-specific details inline
+  /// without re-fetching).
   final Shop? shop;
 
   /// Called when the customer taps "Exit". Typically pops back to Home.
@@ -60,22 +65,20 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
     final bookingId = widget.booking.id;
     if (bookingId == null) {
       // Shouldn't happen for a real created booking, but guard anyway
-      // rather than pushing a tracking page with no id to fetch.
+      // rather than pushing a tracking view with no id to focus on.
       widget.onExit();
       return;
     }
 
     // STACK ROUTING SEQUENCE (spec §2): clear the current navigation
-    // stack context entirely, then push OrderTrackingPage as the new
-    // root — the customer should not be able to "back" into the
-    // checkout flow they just completed.
+    // stack context entirely, then push the Booking Page (focused on
+    // this booking) as the new root — the customer should not be able
+    // to "back" into the checkout flow they just completed.
     Navigator.of(context).pushAndRemoveUntil(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (context, animation, secondaryAnimation) => OrderTrackingPage(
-          bookingId: bookingId,
-          shop: widget.shop,
-        ),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            BookingPageScaffold(focusBookingId: bookingId),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -123,9 +126,9 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Hero tag matches OrderTrackingPage's header wrap — the
-          // check-circle here morphs visually into that page's header
-          // block position during the transition.
+          // Hero tag matches the focused booking card's header wrap in
+          // BookingPage — the check-circle here morphs visually into
+          // that card's header block position during the transition.
           Hero(
             tag: 'booking-${booking.id}-header',
             child: Material(
@@ -195,7 +198,8 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: _goToTracking,
-              child: const Text('View Your Bookings'),
+              // UPDATED: "View Your Bookings" -> "Track Your Order".
+              child: const Text('Track Your Order'),
             ),
           ),
           const SizedBox(height: 12),
@@ -217,3 +221,15 @@ class _BookingConfirmationPageState extends State<BookingConfirmationPage> {
     );
   }
 }
+
+/// NEW — minimal standalone Scaffold wrapper around BookingPage, used
+/// only when we need to PUSH the Booking tab's content as its own
+/// full-screen route (e.g. from this confirmation screen, or from a
+/// notification tap — see notifications_page.dart) instead of
+/// switching to it inside the app's normal bottom-tab shell. Keeps
+/// BookingPage itself free of any AppBar/Scaffold assumptions, since
+/// its normal home is embedded inside MainNavPage's tab body.
+///
+/// Defined in booking_page.dart (not here) so both this screen AND
+/// notifications_page.dart can reuse the exact same wrapper instead of
+/// each keeping their own private copy.

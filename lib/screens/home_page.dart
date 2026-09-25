@@ -1,3 +1,4 @@
+// ============================= home_page.dart =============================
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/booking_status_tracker.dart';
 import '../widgets/illustrated_icon.dart';
+import 'booking_page.dart';
 import 'shop_detail_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -81,177 +83,194 @@ class _HomePageState extends State<HomePage> {
     await Future.wait([_shopsFuture, _loadBookings()]);
   }
 
+  void _openActiveBookingTracking() {
+    final bookingId = _activeBooking?.id;
+    if (bookingId == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BookingPageScaffold(focusBookingId: bookingId)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final customer = widget.customer;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
-      children: [
-        Text(
-          'Hi ${widget.customer.fullName.split(' ').first}, ready for fresh laundry?',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: colors.textPrimary),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Create a booking and track every step of your laundry order.',
-          style: TextStyle(color: colors.textSecondary, height: 1.45),
-        ),
-        const SizedBox(height: 24),
-        _activeBooking != null
-            ? BookingStatusTracker(booking: _activeBooking!)
-            : _NoActiveBookingBanner(colors: colors),
-        const SizedBox(height: 28),
-        Text(
-          'Quick overview',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _OverviewCard(
-                icon: Icons.receipt_long_outlined,
-                label: 'Bookings',
-                value: '$_totalBookingsCount',
-                color: colors.primary,
-                bgColor: colors.chipBg,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _OverviewCard(
-                icon: Icons.check_circle_outline,
-                label: 'Completed',
-                value: '$_completedCount',
-                color: colors.success,
-                bgColor: colors.successBg,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        Text(
-          'Nearby shops',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Browse shops and book your laundry.',
-          style: TextStyle(fontSize: 13, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 190,
-          child: FutureBuilder<List<Shop>>(
-            future: _shopsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return _InlineError(message: '${snapshot.error}', onRetry: _reload);
-              }
-              final shops = snapshot.data ?? [];
-              if (shops.isEmpty) {
-                return IllustratedEmptyState(
-                  icon: Icons.storefront_outlined,
-                  title: 'No shops yet',
-                  message: 'Check back soon — new shops are joining LaundryLink regularly.',
-                );
-              }
-              return ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: shops.length,
-                itemBuilder: (context, index) => Padding(
-                  padding: EdgeInsets.only(right: index == shops.length - 1 ? 0 : 14),
-                  child: SizedBox(
-                    width: 240,
-                    child: _ShopCard(shop: shops[index]),
-                  ),
-                ),
-              );
-            },
+    final Widget topCard = _activeBooking != null
+        ? InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: _openActiveBookingTracking,
+            child: _CardShell(child: BookingStatusTracker(booking: _activeBooking!)),
+          )
+        : _CardShell(child: _NoActiveBookingBanner(colors: colors));
+
+    return RefreshIndicator(
+      onRefresh: _reload,
+      child: ListView(
+        // FIX: ang header ay hiwalay na row na sa itaas ng MainNavPage
+        // (hindi na Positioned background), kaya normal na top padding na
+        // lang ang kailangan dito — wala nang overlap/negative-offset na
+        // "peek" trick para hindi na rin masapawan ang laman ng card ng
+        // border ng header.
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
+        children: [
+          topCard,
+          const SizedBox(height: 28),
+          Text(
+            'Hi ${customer.fullName.split(' ').first}, ready for fresh laundry?',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: colors.textPrimary),
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+          Text(
+            'Create a booking and track every step of your laundry order.',
+            style: TextStyle(color: colors.textSecondary, height: 1.45),
+          ),
+          const SizedBox(height: 28),
+          Text(
+            'Quick overview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _OverviewCard(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Bookings',
+                  value: '$_totalBookingsCount',
+                  color: colors.primary,
+                  bgColor: colors.chipBg,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _OverviewCard(
+                  icon: Icons.check_circle_outline,
+                  label: 'Completed',
+                  value: '$_completedCount',
+                  color: colors.success,
+                  bgColor: colors.successBg,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          Text(
+            'Nearby shops',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Browse shops and book your laundry.',
+            style: TextStyle(fontSize: 13, color: colors.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 190,
+            child: FutureBuilder<List<Shop>>(
+              future: _shopsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return _InlineError(message: '${snapshot.error}', onRetry: _reload);
+                }
+                final shops = snapshot.data ?? [];
+                if (shops.isEmpty) {
+                  return IllustratedEmptyState(
+                    icon: Icons.storefront_outlined,
+                    title: 'No shops yet',
+                    message: 'Check back soon — new shops are joining LaundryLink regularly.',
+                  );
+                }
+                return ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: shops.length,
+                  itemBuilder: (context, index) => Padding(
+                    padding: EdgeInsets.only(right: index == shops.length - 1 ? 0 : 14),
+                    child: SizedBox(
+                      width: 240,
+                      child: _ShopCard(shop: shops[index]),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// UPDATED — dating plain gradient box lang na may icon + text. Ngayon,
-/// may layered translucent na circles/blobs sa background (parang
-/// bubbles) para mas "illustrated" ang itsura, hindi na flat.
+/// Simpleng shadow/rounded-corner shell na lang ito ngayon — wala nang
+/// negative-offset overlap trick, dahil hindi na kailangang "umakyat"
+/// papasok sa header. Header at body ay magkahiwalay nang maayos.
+class _CardShell extends StatelessWidget {
+  const _CardShell({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 22, offset: const Offset(0, 10)),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: child,
+        ),
+      );
+}
+
 class _NoActiveBookingBanner extends StatelessWidget {
   const _NoActiveBookingBanner({required this.colors});
   final AppColors colors;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [colors.primary, colors.primaryLight],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [colors.primary, colors.primaryLight],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(top: -30, right: -20, child: _bubble(90, Colors.white.withValues(alpha: 0.12))),
+            Positioned(bottom: -40, right: 40, child: _bubble(70, Colors.white.withValues(alpha: 0.08))),
+            Positioned(bottom: -10, left: -25, child: _bubble(60, Colors.white.withValues(alpha: 0.1))),
+            Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+                  child: const Icon(Icons.local_laundry_service_rounded, color: Colors.white, size: 28),
+                ),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Text(
+                    'No active bookings yet\nTap the + button to create one.',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, height: 1.45),
+                  ),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(color: colors.primary.withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 8)),
-            ],
-          ),
-          child: Stack(
-            children: [
-              // Decorative bubbles — parehong tema ng "bubbles/wash
-              // cycle" ng laundry app. Naka-Positioned sa labas ng
-              // visible bounds para pumutol nang natural sa gilid.
-              Positioned(
-                top: -30,
-                right: -20,
-                child: _bubble(90, Colors.white.withValues(alpha: 0.12)),
-              ),
-              Positioned(
-                bottom: -40,
-                right: 40,
-                child: _bubble(70, Colors.white.withValues(alpha: 0.08)),
-              ),
-              Positioned(
-                bottom: -10,
-                left: -25,
-                child: _bubble(60, Colors.white.withValues(alpha: 0.1)),
-              ),
-              Row(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.local_laundry_service_rounded, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 16),
-                  const Expanded(
-                    child: Text(
-                      'No active bookings yet\nTap the + button to create one.',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, height: 1.45),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          ],
         ),
       );
 
-  Widget _bubble(double size, Color color) => Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      );
+  Widget _bubble(double size, Color color) =>
+      Container(width: size, height: size, decoration: BoxDecoration(color: color, shape: BoxShape.circle));
 }
 
 class _InlineError extends StatelessWidget {
@@ -338,15 +357,11 @@ class _ShopCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // UPDATED — dating plain solid gradient strip lang. Ngayon
-            // may subtle dot pattern sa loob para hindi flat.
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
               child: Container(
                 height: 6,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [colors.primary, colors.primaryLight]),
-                ),
+                decoration: BoxDecoration(gradient: LinearGradient(colors: [colors.primary, colors.primaryLight])),
               ),
             ),
             Padding(
@@ -368,10 +383,7 @@ class _ShopCard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(color: colors.neutralBg, borderRadius: BorderRadius.circular(20)),
-                          child: Text(
-                            'Closed',
-                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral),
-                          ),
+                          child: Text('Closed', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral)),
                         ),
                     ],
                   ),

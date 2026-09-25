@@ -1,3 +1,4 @@
+// ============================= profile_page.dart =============================
 import 'package:flutter/material.dart';
 
 import '../models/customer.dart';
@@ -11,7 +12,11 @@ import 'settings_page.dart';
 const String _kAppVersion = '1.0.0';
 
 class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key, required this.customer, this.onProfileUpdated});
+  const ProfilePage({
+    super.key,
+    required this.customer,
+    this.onProfileUpdated,
+  });
   final Customer customer;
   final ValueChanged<Customer>? onProfileUpdated;
 
@@ -61,7 +66,11 @@ class ProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
-    return ListView(padding: const EdgeInsets.all(20), children: [
+    // FIX: hindi na kailangan ng headerHeight — hiwalay na row na ang
+    // header sa MainNavPage (Column layout, hindi na Positioned
+    // background), kaya normal na top padding lang ang kailangan para
+    // hindi matakpan ang avatar/pangalan sa taas.
+    return ListView(padding: const EdgeInsets.fromLTRB(20, 20, 20, 20), children: [
       Center(
         child: CircleAvatar(
           radius: 42,

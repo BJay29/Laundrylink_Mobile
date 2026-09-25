@@ -21,12 +21,20 @@ class BookingService {
   /// priority (see Booking.fromJson).
   ///
   /// UPDATED (Payment / Online Payment feature): idinagdag ang
-  /// [paymentMethod] ("cash" | "cod" | "gcash" | "paymaya", default
-  /// "cash" gaya ng CustomerBookingCreate sa backend) at
-  /// [proofOfPaymentUrl] — ang public URL na ibinalik ng
+  /// [paymentMethod] ("cash" | "cod" | "gcash" | "paymaya" |
+  /// "online_qr", default "cash" gaya ng CustomerBookingCreate sa
+  /// backend) at [proofOfPaymentUrl] — ang public URL na ibinalik ng
   /// POST /uploads/payment-proof (see UploadService), ipapasa lang kung
-  /// gcash/paymaya AT may na-upload na resibo BAGO tawagin ang function
-  /// na ito.
+  /// gcash/paymaya/online_qr AT may na-upload na resibo BAGO tawagin ang
+  /// function na ito.
+  ///
+  /// NEW (Delivery Address feature): idinagdag ang [addressId] — id ng
+  /// isa sa mga saved Address ng customer (see AddressService), REQUIRED
+  /// ng backend kapag [fulfillmentMode] == "delivery" (see
+  /// CustomerBookingCreate.address_id validator sa app/schemas.py).
+  /// Ignored/omitted kapag "dropoff" — walang epekto kahit ipasa, kaya
+  /// ligtas itong laging ipasa mula sa form kung meron man, hindi
+  /// kailangang i-null-out manually sa drop-off case.
   Future<Booking> createBooking({
     required int shopId,
     required String shopName,
@@ -35,6 +43,7 @@ class BookingService {
     String? specialInstructions,
     String fulfillmentMode = 'dropoff',
     DateTime? pickupDatetime,
+    int? addressId,
     List<int> addOnIds = const [],
     String? promoCode,
     String paymentMethod = 'cash',
@@ -55,6 +64,7 @@ class BookingService {
       if (specialInstructions != null && specialInstructions.trim().isNotEmpty)
         'special_instructions': specialInstructions.trim(),
       if (pickupDatetime != null) 'pickup_datetime': pickupDatetime.toIso8601String(),
+      if (addressId != null) 'address_id': addressId,
       if (promoCode != null && promoCode.trim().isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
       if (proofOfPaymentUrl != null && proofOfPaymentUrl.trim().isNotEmpty)
         'proof_of_payment_url': proofOfPaymentUrl.trim(),
@@ -62,6 +72,40 @@ class BookingService {
 
     final data = await _api.post('/bookings/customer', body, token: token);
     return Booking.fromJson(data, shopName: shopName);
+  }
+
+  /// NEW (Real-time Promo Preview feature) — Checks a promo code against
+  /// a shop + subtotal WITHOUT creating a booking, so BookingFormPage can
+  /// show a live discount and recalculated total as the customer types.
+  /// Calls the backend's POST /bookings/promo-preview.
+  ///
+  /// Expected response shape (PromoPreviewResponse on the backend):
+  ///   { "valid": true, "code": "WELCOME10", "discount_amount": 50.0 }
+  /// or, when the code is invalid/expired/not applicable:
+  ///   { "valid": false, "message": "This code has expired." }
+  ///
+  /// Same auth requirement as the rest of this service — the customer
+  /// must already be logged in to reach BookingFormPage in the first
+  /// place, so this throws the same 401 ApiException as the others if
+  /// somehow called without a session.
+  Future<Map<String, dynamic>> previewPromoCode({
+    required int shopId,
+    required String code,
+    required double subtotal,
+  }) async {
+    final token = CustomerSession.instance.authToken;
+    if (token == null) {
+      throw const ApiException('You must be logged in to preview a promo code.', statusCode: 401);
+    }
+
+    final body = <String, dynamic>{
+      'shop_id': shopId,
+      'code': code.trim().toUpperCase(),
+      'subtotal': subtotal,
+    };
+
+    final data = await _api.post('/bookings/promo-preview', body, token: token);
+    return data as Map<String, dynamic>;
   }
 
   /// Fetches ALL bookings made by the logged-in customer (any shop, any
