@@ -63,8 +63,11 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
               SliverAppBar(
                 backgroundColor: colors.primary,
                 foregroundColor: Colors.white,
-                expandedHeight: 172,
+                expandedHeight: 176,
                 pinned: true,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+                ),
                 flexibleSpace: FlexibleSpaceBar(
                   titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
                   title: Text(
@@ -74,18 +77,25 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
                   ),
                   background: Container(
-                    color: colors.primary,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [colors.primary, colors.primaryLight],
+                      ),
+                    ),
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 56),
                     alignment: Alignment.bottomLeft,
                     child: Container(
-                      width: 48,
-                      height: 48,
+                      width: 52,
+                      height: 52,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                       ),
-                      child: const Icon(Icons.local_laundry_service_rounded, color: Colors.white, size: 24),
+                      child: const Icon(Icons.local_laundry_service_rounded, color: Colors.white, size: 26),
                     ),
                   ),
                 ),
@@ -101,7 +111,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.location_on_outlined, size: 16, color: colors.textSecondary),
+                          Icon(Icons.location_on_rounded, size: 16, color: colors.textSecondary),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
@@ -130,7 +140,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             color: colors.errorBg,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: colors.errorBorder),
                           ),
                           child: Row(
@@ -164,7 +174,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                           padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
                             color: colors.surface,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: colors.border),
                           ),
                           child: Text(
@@ -176,7 +186,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                         ...List.generate(shop.services.length, (index) {
                           final service = shop.services[index];
                           return Padding(
-                            padding: EdgeInsets.only(bottom: index == shop.services.length - 1 ? 0 : 10),
+                            padding: EdgeInsets.only(bottom: index == shop.services.length - 1 ? 0 : 12),
                             child: _ServiceTile(
                               service: service,
                               isShopOnline: isShopOnline,
@@ -204,19 +214,24 @@ class _ShopStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final Color fg = isOnline ? colors.success : colors.neutral;
+    final Color bg = isOnline ? colors.successBg : colors.neutralBg;
     final String label = isOnline ? 'Open now' : 'Currently closed';
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 7),
-        Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 7),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
+        ],
+      ),
     );
   }
 }
@@ -235,11 +250,20 @@ class _ServiceTile extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: colors.border),
+        boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 12, offset: const Offset(0, 5))],
       ),
       child: Row(
         children: [
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(14)),
+            child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 20),
+          ),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,7 +286,7 @@ class _ServiceTile extends StatelessWidget {
               disabledBackgroundColor: colors.neutralBg,
               disabledForegroundColor: colors.neutral,
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: Text(isShopOnline ? 'Book' : 'Closed'),
           ),

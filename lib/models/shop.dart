@@ -54,6 +54,41 @@ class AddOnItem {
       );
 }
 
+/// NEW (Home page promo carousel) — mirrors the backend's
+/// PromoCodePreview (schemas.py): a safe, customer-facing view of one
+/// of a shop's currently-ACTIVE promo codes. The backend has already
+/// filtered out inactive/expired/exhausted codes before this ever
+/// reaches the app (see shop_service._get_active_promos()) — this
+/// class does no validity checking of its own, it's purely display +
+/// the code text itself, which doubles as what the customer types into
+/// the "Promo code" field on BookingFormPage.
+class PromoPreview {
+  const PromoPreview({
+    required this.code,
+    required this.discountType,
+    required this.discountValue,
+  });
+
+  final String code;
+
+  /// "percent" or "fixed" — same two values the backend's PromoCode
+  /// model uses (see discount_type in models.py).
+  final String discountType;
+  final double discountValue;
+
+  /// Short display label for a badge/chip — "20% OFF" for a percent
+  /// discount, "₱50 OFF" for a fixed peso discount.
+  String get label => discountType == 'percent'
+      ? '${discountValue.toStringAsFixed(0)}% OFF'
+      : '₱${discountValue.toStringAsFixed(0)} OFF';
+
+  factory PromoPreview.fromJson(Map<String, dynamic> json) => PromoPreview(
+        code: json['code'] as String,
+        discountType: json['discount_type'] as String? ?? 'percent',
+        discountValue: (json['discount_value'] as num?)?.toDouble() ?? 0.0,
+      );
+}
+
 class Shop {
   const Shop({
     required this.id,
@@ -68,6 +103,10 @@ class Shop {
     this.services = const [],
     this.addOns = const [],
     this.qrCodeUrl,
+    this.activePromos = const [],
+    this.acceptsCash = true,
+    this.acceptsCod = false,
+    this.acceptsOnline = false,
   });
 
   final int id;
@@ -104,11 +143,39 @@ class Shop {
   /// tumatanggap ng GCash/PayMaya/atbp. sa iisang QR image).
   ///
   /// Null kung hindi pa naka-set ng shop ang kanilang QR sa
-  /// Optimization Settings — ginagamit ito ng booking_form_page.dart
-  /// bilang "shop toggle": kung null ito, hindi dapat ipakita ang
-  /// "Online Payment (QR Ph)" option sa payment method selector,
-  /// "Cash on Counter" na lang ang available.
+  /// Optimization Settings. Sa sarili nito, HINDI na ito sapat para
+  /// malaman kung dapat bang tanggapin ang "Online Payment" — see
+  /// [acceptsOnline] sa ibaba, na siyang HIWALAY na "gustong tanggapin
+  /// ba" toggle. Parehong kailangan (`acceptsOnline && qrCodeUrl !=
+  /// null`) bago ipakita bilang available ang online payment.
   final String? qrCodeUrl;
+
+  /// NEW (Home page promo carousel) — currently-active promo codes for
+  /// this shop, populated on BOTH GET /shops/ (listing) and
+  /// GET /shops/nearby, same as the other listing-level fields above.
+  /// Empty for a shop with no live promos right now. The Home page
+  /// filters shops down to the ones where this is non-empty to build
+  /// the "Promos for you" carousel — see widgets/promo_carousel.dart.
+  final List<PromoPreview> activePromos;
+
+  /// NEW (Online Payment toggle fix — Booking & Order Tracking Flow
+  /// Fix). Mirrors the shop's "Payment Methods" toggles from
+  /// Optimization Settings (Shop.accepts_cash/accepts_cod/
+  /// accepts_online in the backend). Only populated on Shop Detail
+  /// (GET /shops/{id}), same as qrCodeUrl — defaults (true/false/false)
+  /// match the backend's own column defaults, so a shop that hasn't
+  /// touched these settings still resolves sensibly.
+  ///
+  /// FIXED: dati ay `qrCodeUrl != null` LANG ang tinitingnan ng
+  /// BookingFormPage para malaman kung available ba ang online
+  /// payment — kaya kahit naka-ON na ang toggle na ito sa web,
+  /// nananatiling naka-disable ang option hangga't walang na-upload na
+  /// QR image (dalawang magkaibang bagay na dati'y pinagsama bilang
+  /// isa). Ngayon, PAREHONG kailangan: [acceptsOnline] == true AT
+  /// [qrCodeUrl] != null.
+  final bool acceptsCash;
+  final bool acceptsCod;
+  final bool acceptsOnline;
 
   factory Shop.fromJson(Map<String, dynamic> json) => Shop(
         id: json['id'] as int,
@@ -131,5 +198,13 @@ class Shop {
                 .map((a) => AddOnItem.fromJson(a as Map<String, dynamic>))
                 .toList(),
         qrCodeUrl: json['qr_code_url'] as String?,
+        activePromos: json['active_promos'] == null
+            ? const []
+            : (json['active_promos'] as List<dynamic>)
+                .map((p) => PromoPreview.fromJson(p as Map<String, dynamic>))
+                .toList(),
+        acceptsCash: json['accepts_cash'] as bool? ?? true,
+        acceptsCod: json['accepts_cod'] as bool? ?? false,
+        acceptsOnline: json['accepts_online'] as bool? ?? false,
       );
 }

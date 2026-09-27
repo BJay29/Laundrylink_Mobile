@@ -54,13 +54,30 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool _checkingPromo = false;
   Timer? _promoDebounce;
 
-  /// Whether this shop has set up their QR code — the "shop control
-  /// toggle" from the spec. When false, "Online Payment" is still
-  /// SHOWN (per the redesign) but rendered disabled with an inline
-  /// explanation, rather than hidden outright — so the customer always
-  /// sees the full set of possible payment methods, not a shrinking
-  /// list that depends on shop configuration.
-  bool get _onlinePaymentAvailable => widget.shop.qrCodeUrl != null;
+  /// FIXED (Online Payment toggle bug — Booking & Order Tracking Flow
+  /// Fix): dating `qrCodeUrl != null` LANG ang tinitingnan dito —
+  /// kaya kahit naka-ON na ang "Online Payment" toggle sa Optimization
+  /// Settings (Shop.accepts_online), permanenteng naka-disable pa rin
+  /// ang option kung walang na-upload pang QR image, at WALANG paraan
+  /// para malaman ng app kung talagang gusto ng shop na tanggapin ito
+  /// kung meron namang QR pero naka-OFF ang toggle.
+  ///
+  /// Ngayon, PAREHONG kailangan: naka-ON ang toggle AT meron nang
+  /// na-upload na QR — kailangan talaga ang dalawa bago maging
+  /// magagamit ang option.
+  bool get _onlinePaymentAvailable => widget.shop.acceptsOnline && widget.shop.qrCodeUrl != null;
+
+  /// NEW — magkaibang paliwanag depende kung ALIN sa dalawang
+  /// kondisyon ang kulang, para malinaw sa customer (at sa staff, kung
+  /// sila mismo ang nagtatanong) kung ano pa ang dapat ayusin sa shop
+  /// side sa halip na isang generic na mensahe lang.
+  String? get _onlinePaymentUnavailableReason {
+    if (_onlinePaymentAvailable) return null;
+    if (!widget.shop.acceptsOnline) {
+      return 'This shop currently only accepts cash payments.';
+    }
+    return "This shop hasn't uploaded their QR code yet, so Online Payment is unavailable for now.";
+  }
 
   @override
   void initState() {
@@ -314,13 +331,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colors.primary),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
 
             const _FieldLabel('Quantity'),
             TextFormField(
               controller: _quantityController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: _inputDecoration(context, hint: _quantityLabel),
+              decoration: _inputDecoration(context, hint: _quantityLabel, icon: Icons.scale_outlined),
               validator: (value) {
                 final parsed = double.tryParse((value ?? '').trim());
                 if (parsed == null || parsed <= 0) return 'Enter a valid ${_quantityLabel.toLowerCase()}.';
@@ -328,7 +345,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
               },
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
             const _FieldLabel('Fulfillment'),
             Row(
               children: [
@@ -373,23 +390,30 @@ class _BookingFormPageState extends State<BookingFormPage> {
             ],
 
             if (_fulfillmentMode == 'delivery') ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               const _FieldLabel('Pickup date & time'),
               InkWell(
                 onTap: _pickPickupDateTime,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: colors.surface,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: colors.border),
+                    boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 10, offset: const Offset(0, 4))],
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.event_outlined, size: 18, color: colors.primary),
-                      const SizedBox(width: 10),
+                      Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
+                        child: Icon(Icons.event_outlined, size: 16, color: colors.primary),
+                      ),
+                      const SizedBox(width: 12),
                       Text(
                         _pickupDatetime == null
                             ? 'Select pickup date & time'
@@ -400,6 +424,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      const Spacer(),
+                      Icon(Icons.chevron_right_rounded, color: colors.textMuted),
                     ],
                   ),
                 ),
@@ -412,7 +438,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 ),
               ],
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               const _FieldLabel('Delivery address'),
               _AddressSelector(
                 loading: _loadingAddresses,
@@ -429,7 +455,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
             ],
 
             if (widget.shop.addOns.isNotEmpty) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: 22),
               const _FieldLabel('Add-ons'),
               ...widget.shop.addOns.map(
                 (addOn) => _AddOnCheckboxTile(
@@ -447,7 +473,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
             ],
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
             const _FieldLabel('Special instructions (optional)'),
             TextFormField(
               controller: _instructionsController,
@@ -456,14 +482,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
             ),
 
             // --- Payment Method selector ---
-            // UPDATED: "Online Payment" is now ALWAYS rendered — no
-            // longer hidden when the shop hasn't set up a QR. Instead
-            // it's shown disabled with an inline explanation, same
-            // pattern used for the Service Terminal's rider-gated
-            // "Weigh & Price" button. Selection only — no payment
-            // happens on this page (settled later once the shop
-            // confirms the final weight; see the note below).
-            const SizedBox(height: 20),
+            // "Online Payment" is always rendered — never hidden.
+            // Disabled (with an explanation) when either the shop's
+            // toggle is off OR no QR has been uploaded — see
+            // _onlinePaymentAvailable / _onlinePaymentUnavailableReason
+            // above. Selection only — no payment happens on this page
+            // (settled later once the shop confirms the final weight).
+            const SizedBox(height: 22),
             const _FieldLabel('Payment Method'),
             _PaymentMethodSelector(
               selected: _paymentMethod,
@@ -472,13 +497,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
               onChanged: (value) => setState(() => _paymentMethod = value),
             ),
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: 8),
               child: Text(
                 'You\'re only choosing a method now — you\'ll settle payment once the shop confirms the final weight, from your Bookings page.',
                 style: TextStyle(fontSize: 11.5, color: colors.textMuted),
               ),
             ),
-            if (!_onlinePaymentAvailable) ...[
+            if (_onlinePaymentUnavailableReason != null) ...[
               const SizedBox(height: 6),
               Row(
                 children: [
@@ -486,7 +511,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
-                      'This shop hasn\'t set up online payments yet, so Online Payment is unavailable for now.',
+                      _onlinePaymentUnavailableReason!,
                       style: TextStyle(fontSize: 11.5, color: colors.textMuted),
                     ),
                   ),
@@ -494,12 +519,12 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
             ],
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
             const _FieldLabel('Promo code (optional)'),
             TextFormField(
               controller: _promoController,
               textCapitalization: TextCapitalization.characters,
-              decoration: _inputDecoration(context, hint: 'e.g. WELCOME10').copyWith(
+              decoration: _inputDecoration(context, hint: 'e.g. WELCOME10', icon: Icons.local_offer_outlined).copyWith(
                 suffixIcon: _checkingPromo
                     ? const Padding(
                         padding: EdgeInsets.all(14),
@@ -528,7 +553,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 ),
             ],
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 26),
             _PriceSummary(
               basePrice: widget.service.price * _quantity,
               addOnsTotal: _addOnsTotal,
@@ -564,21 +589,29 @@ class _BookingFormPageState extends State<BookingFormPage> {
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
-              child: FilledButton(
-                onPressed: _submitting ? null : _submit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: colors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: colors.primary.withOpacity(0.32), blurRadius: 18, offset: const Offset(0, 8)),
+                  ],
                 ),
-                child: _submitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-                      )
-                    : const Text('Send booking request', style: TextStyle(fontWeight: FontWeight.w700)),
+                child: FilledButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                        )
+                      : const Text('Send booking request', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -593,28 +626,29 @@ class _BookingFormPageState extends State<BookingFormPage> {
     );
   }
 
-  InputDecoration _inputDecoration(BuildContext context, {required String hint}) {
+  InputDecoration _inputDecoration(BuildContext context, {required String hint, IconData? icon}) {
     final colors = context.colors;
     return InputDecoration(
       hintText: hint,
       hintStyle: TextStyle(color: colors.textMuted, fontSize: 13.5),
+      prefixIcon: icon == null ? null : Icon(icon, size: 19, color: colors.textSecondary),
       filled: true,
       fillColor: colors.surface,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: colors.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: colors.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: colors.primary, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: colors.error),
       ),
     );
@@ -661,7 +695,7 @@ class _AddressSelector extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: colors.border),
         ),
         child: const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -673,7 +707,7 @@ class _AddressSelector extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: colors.errorBg,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: colors.errorBorder),
         ),
         child: Row(
@@ -692,19 +726,19 @@ class _AddressSelector extends StatelessWidget {
     if (addresses.isEmpty) {
       return InkWell(
         onTap: onAddNew,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
           decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(14),
+            color: colors.chipBg,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: colors.primary, style: BorderStyle.solid),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add_location_alt_outlined, size: 18, color: colors.primary),
+              Icon(Icons.add_location_alt_rounded, size: 18, color: colors.primary),
               const SizedBox(width: 8),
               Text(
                 'Add a delivery address',
@@ -728,12 +762,12 @@ class _AddressSelector extends StatelessWidget {
         ],
         InkWell(
           onTap: onAddNew,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: colors.border),
             ),
             child: Row(
@@ -766,13 +800,17 @@ class _AddressTile extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: selected ? colors.chipBg : colors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: selected ? colors.primary : colors.border, width: selected ? 1.5 : 1),
+          boxShadow: selected
+              ? [BoxShadow(color: colors.primary.withOpacity(0.16), blurRadius: 12, offset: const Offset(0, 4))]
+              : null,
         ),
         child: Row(
           children: [
@@ -811,10 +849,9 @@ class _AddressTile extends StatelessWidget {
   }
 }
 
-/// UPDATED (payment method redesign): "Online Payment" is now always
-/// rendered, never removed from the layout — when unavailable it's
-/// simply disabled (greyed out, no onTap), so the customer always sees
-/// the full set of methods the shop could support instead of the list
+/// "Online Payment" is always rendered — when unavailable it's simply
+/// disabled (greyed out, no onTap), so the customer always sees the
+/// full set of methods the shop could support instead of the list
 /// silently shrinking.
 class _PaymentMethodSelector extends StatelessWidget {
   const _PaymentMethodSelector({
@@ -851,7 +888,7 @@ class _PaymentMethodSelector extends StatelessWidget {
         Expanded(
           child: _PaymentOptionTile(
             label: 'Online Payment (QR Ph)',
-            icon: Icons.qr_code_2,
+            icon: Icons.qr_code_2_rounded,
             selected: selected == 'online_qr',
             enabled: onlineAvailable,
             onTap: onlineAvailable ? () => onChanged('online_qr') : null,
@@ -887,19 +924,23 @@ class _PaymentOptionTile extends StatelessWidget {
       opacity: enabled ? 1.0 : 0.55,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
           decoration: BoxDecoration(
             color: isActive ? colors.chipBg : colors.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: isActive ? colors.primary : colors.border),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: isActive ? colors.primary : colors.border, width: isActive ? 1.5 : 1),
+            boxShadow: isActive
+                ? [BoxShadow(color: colors.primary.withOpacity(0.16), blurRadius: 12, offset: const Offset(0, 4))]
+                : null,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 20, color: activeColor),
-              const SizedBox(height: 6),
+              Icon(icon, size: 22, color: activeColor),
+              const SizedBox(height: 8),
               Text(
                 label,
                 textAlign: TextAlign.center,
@@ -908,7 +949,7 @@ class _PaymentOptionTile extends StatelessWidget {
               if (!enabled) ...[
                 const SizedBox(height: 3),
                 Text(
-                  'Not set up yet',
+                  'Not available',
                   style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: colors.textMuted),
                 ),
               ],
@@ -933,11 +974,20 @@ class _SectionCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 14, offset: const Offset(0, 4))],
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border),
+        boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 16, offset: const Offset(0, 6))],
       ),
       child: Row(
         children: [
+          Container(
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(14)),
+            child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 22),
+          ),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,18 +1037,22 @@ class _ChoiceChipTile extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(vertical: 15),
         decoration: BoxDecoration(
           color: selected ? colors.chipBg : colors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? colors.primary : colors.border),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: selected ? colors.primary : colors.border, width: selected ? 1.5 : 1),
+          boxShadow: selected
+              ? [BoxShadow(color: colors.primary.withOpacity(0.16), blurRadius: 12, offset: const Offset(0, 4))]
+              : null,
         ),
         child: Column(
           children: [
-            Icon(icon, size: 20, color: activeColor),
-            const SizedBox(height: 6),
+            Icon(icon, size: 21, color: activeColor),
+            const SizedBox(height: 7),
             Text(
               label,
               style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: activeColor),
@@ -1021,13 +1075,14 @@ class _AddOnCheckboxTile extends StatelessWidget {
     final colors = context.colors;
     return InkWell(
       onTap: () => onChanged(!selected),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(14),
+          color: selected ? colors.chipBg : colors.surface,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: selected ? colors.primary : colors.border),
         ),
         child: Row(
@@ -1070,11 +1125,16 @@ class _PriceSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colors.surface, colors.chipBg.withOpacity(0.4)],
+        ),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: colors.border),
+        boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 16, offset: const Offset(0, 6))],
       ),
       child: Column(
         children: [
@@ -1083,14 +1143,14 @@ class _PriceSummary extends StatelessWidget {
           if (deliveryFee > 0) _row(context, 'Delivery fee', deliveryFee),
           if (discount > 0) _row(context, 'Promo discount', -discount, highlight: true),
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1, color: colors.border),
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Estimated total', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: colors.textPrimary)),
-              Text('₱${total.toStringAsFixed(2)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: colors.primary)),
+              Text('₱${total.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.primary)),
             ],
           ),
         ],
@@ -1103,7 +1163,7 @@ class _PriceSummary extends StatelessWidget {
     final color = highlight ? colors.success : colors.textSecondary;
     final sign = value < 0 ? '-' : '';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

@@ -1,3 +1,4 @@
+# ============================= pubspec.yaml =============================
 name: Laundrylink
 description: "A new Flutter project."
 publish_to: 'none'
@@ -20,12 +21,18 @@ dependencies:
   jwt_decoder: ^2.0.1
   intl: ^0.20.2
 
-  # NEW — Module A/C: image picker para sa "Upload Proof of Payment /
-  # Screenshot" (booking_payment_page.dart), at "save to gallery" para
-  # sa shop's QR code image.
   image_picker: ^1.1.2
   gal: ^2.3.1
   path_provider: ^2.1.4
+
+  # NEW — geolocator: kukuha ng aktwal na GPS coordinates (lat/lng) ng
+  # device, kasama ang permission-request flow (checkPermission /
+  # requestPermission) at pag-detect kung naka-on ang Location Services.
+  geolocator: ^13.0.1
+  # NEW — geocoding: reverse-geocoding — i-co-convert ang lat/lng papunta
+  # sa readable address (street, city, province) — ito yung "automatic
+  # na exact address" na kailangan mo sa Saved Addresses form.
+  geocoding: ^3.0.0
 
 dev_dependencies:
   flutter_test:

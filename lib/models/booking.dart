@@ -69,6 +69,60 @@ BookingStatus _statusFromApi(String? raw) {
   }
 }
 
+/// NEW — mirrors the backend's MachineAssignmentResponse (one row per
+/// load in a multi-machine booking — see BookingMachineAssignment in
+/// app/models.py). `phase` is "washing" | "drying" | "done" and is the
+/// source of truth for whether a given load is currently being washed
+/// or dried — used to pick the right label for the live countdown
+/// timer instead of a hardcoded "Washing In Progress" that never
+/// changed once a load moved to the dryer.
+class BookingMachineAssignment {
+  const BookingMachineAssignment({
+    required this.id,
+    required this.loadNumber,
+    required this.phase,
+    this.washerNumber,
+    this.dryerNumber,
+    this.washingStartedAt,
+    this.washingCompletedAt,
+    this.dryingStartedAt,
+    this.dryingCompletedAt,
+  });
+
+  final int id;
+  final int loadNumber;
+
+  /// "washing" | "drying" | "done"
+  final String phase;
+
+  final int? washerNumber;
+  final int? dryerNumber;
+  final DateTime? washingStartedAt;
+  final DateTime? washingCompletedAt;
+  final DateTime? dryingStartedAt;
+  final DateTime? dryingCompletedAt;
+
+  factory BookingMachineAssignment.fromJson(Map<String, dynamic> json) => BookingMachineAssignment(
+        id: json['id'] as int,
+        loadNumber: json['load_number'] as int,
+        phase: json['phase'] as String? ?? 'washing',
+        washerNumber: json['washer_number'] as int?,
+        dryerNumber: json['dryer_number'] as int?,
+        washingStartedAt: json['washing_started_at'] == null
+            ? null
+            : DateTime.tryParse(json['washing_started_at'] as String),
+        washingCompletedAt: json['washing_completed_at'] == null
+            ? null
+            : DateTime.tryParse(json['washing_completed_at'] as String),
+        dryingStartedAt: json['drying_started_at'] == null
+            ? null
+            : DateTime.tryParse(json['drying_started_at'] as String),
+        dryingCompletedAt: json['drying_completed_at'] == null
+            ? null
+            : DateTime.tryParse(json['drying_completed_at'] as String),
+      );
+}
+
 class Booking {
   const Booking({
     this.id,
@@ -116,6 +170,7 @@ class Booking {
     this.deliveryRiderName,
     this.deliveryRiderContact,
     this.deliveryRiderAssignedAt,
+    this.machineAssignments = const [],
   });
 
   final int? id;
@@ -135,6 +190,9 @@ class Booking {
   final String? promoCode;
   final double? discountAmount;
   final DateTime? bookingTimestamp;
+
+  /// Legacy single-machine fields — still populated by the backend for
+  /// single-load bookings that used the legacy assign path.
   final int? washerNumber;
   final int? dryerNumber;
   final String? declineReason;
@@ -157,7 +215,7 @@ class Booking {
   final DateTime? readyAt;
   final DateTime? completedAt;
 
-  /// NEW — live countdown target, mula sa naka-assign na machine's
+  /// Live countdown target, mula sa naka-assign na machine's
   /// cycle_started_at + remaining_time (backend-computed property).
   /// Null kung hindi "In Progress" o walang aktibong machine cycle.
   final DateTime? estimatedCompletionTime;
@@ -173,6 +231,38 @@ class Booking {
   final String? deliveryRiderName;
   final String? deliveryRiderContact;
   final DateTime? deliveryRiderAssignedAt;
+
+  /// NEW — per-load machine assignment rows (multi-machine bookings).
+  /// Empty for legacy single-machine bookings, which instead use
+  /// washerNumber/dryerNumber directly.
+  final List<BookingMachineAssignment> machineAssignments;
+
+  /// NEW — resolves whether the booking's active machine cycle right
+  /// now is a "washing" or "drying" phase, for the countdown timer's
+  /// label. Priority:
+  ///   1. Any not-yet-"done" load in machineAssignments (multi-machine
+  ///      path) — if ANY load is still "drying", treat the whole
+  ///      booking as "drying" (a later phase supersedes an earlier one
+  ///      for display purposes, since the countdown itself already
+  ///      reflects the single longest-remaining active cycle).
+  ///   2. Legacy single-machine fallback: dryerNumber set and no
+  ///      washerNumber (dry_only) or both set (full_service, assume
+  ///      drying once dryer is present) → "drying"; otherwise
+  ///      "washing".
+  /// Returns null if status isn't inProgress at all.
+  String? get activePhase {
+    if (status != BookingStatus.inProgress) return null;
+
+    if (machineAssignments.isNotEmpty) {
+      final active = machineAssignments.where((a) => a.phase != 'done').toList();
+      if (active.isEmpty) return 'washing';
+      if (active.any((a) => a.phase == 'drying')) return 'drying';
+      return 'washing';
+    }
+
+    if (dryerNumber != null) return 'drying';
+    return 'washing';
+  }
 
   factory Booking.fromJson(Map<String, dynamic> json, {String shopName = ''}) => Booking(
         id: json['id'] as int?,
@@ -244,6 +334,10 @@ class Booking {
         deliveryRiderAssignedAt: json['delivery_rider_assigned_at'] == null
             ? null
             : DateTime.tryParse(json['delivery_rider_assigned_at'] as String),
+        machineAssignments: (json['machine_assignments'] as List<dynamic>?)
+                ?.map((e) => BookingMachineAssignment.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
       );
 }
 

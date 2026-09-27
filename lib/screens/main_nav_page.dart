@@ -149,12 +149,21 @@ class _MainNavPageState extends State<MainNavPage> {
   }
 }
 
-/// Ang navy header ngayon — normal na widget sa loob ng Column, may
-/// sarili itong laki (SafeArea + padding + content, hindi na fixed
-/// `height` na ipinapasa galing sa labas). Idinagdag din ang tunay na
-/// border sa ibaba (`Border.bottom`) — ito na mismo yung gilid/border na
-/// hiniling mong ayusin: bahagi na siya ng header shape mismo, hindi
-/// guhit lang na nakapatong sa ibabaw ng ibang layer.
+/// Ang navy header — normal na widget sa loob ng Column, may sarili itong
+/// laki (SafeArea + padding + content). May tunay na border sa ibaba
+/// (`Border.bottom`) — bahagi ito ng header shape mismo, hindi guhit lang
+/// na nakapatong sa ibabaw ng ibang layer.
+///
+/// UPDATED (profile text alignment fix + LAUNDRYLINK brand retained): ang
+/// left-side text stack ay Column na ngayon (`crossAxisAlignment.start`)
+/// na may TATLONG linya, nasa tamang pagkakasunod-sunod:
+///   1. LAUNDRYLINK brand text (maliit, italic, cyan/gold) — INIBALIK ito,
+///      hindi na dapat natanggal.
+///   2. Full Name (bold, 16, white)
+///   3. Mobile Number (normal, 12, white70)
+/// Ang buong header content ay isang Row sa labas na may
+/// `mainAxisAlignment.spaceBetween`, kaya nananatiling naka-pin ang Bell +
+/// Avatar sa kanang gilid anuman ang haba ng laman sa kaliwa.
 class _HeaderBackground extends StatelessWidget {
   const _HeaderBackground({
     required this.customer,
@@ -194,56 +203,38 @@ class _HeaderBackground extends StatelessWidget {
               bottom: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                // MAIN ROW REALIGNMENT: `spaceBetween` para ang text block
+                // (kaliwa) at ang Bell/Avatar frame (kanan) ay laging
+                // naka-pin sa magkabilang gilid ng header.
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    // LEFT SIDE: brand + user profile text stack.
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Good day,',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            customer.fullName.split(' ').first,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          RichText(
-                            text: const TextSpan(
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic),
-                              children: [
-                                TextSpan(text: 'LAUNDRY', style: TextStyle(color: _kAccentCyan)),
-                                TextSpan(text: 'LINK', style: TextStyle(color: _kAccentGold)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                      child: _UserProfileText(customer: customer),
                     ),
-                    _HeaderIconButton(
-                      icon: Icons.notifications_none_rounded,
-                      badgeCount: unreadCount,
-                      onTap: onNotificationsTap,
-                    ),
-                    const SizedBox(width: 10),
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.white.withOpacity(0.18),
-                      child: Text(
-                        customer.initials,
-                        style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13),
-                      ),
+                    const SizedBox(width: 12),
+                    // RIGHT SIDE: Bell + Avatar, laging magkasama sa
+                    // kanang gilid ng frame.
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _HeaderIconButton(
+                          icon: Icons.notifications_none_rounded,
+                          badgeCount: unreadCount,
+                          onTap: onNotificationsTap,
+                        ),
+                        const SizedBox(width: 10),
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.white.withOpacity(0.18),
+                          child: Text(
+                            customer.initials,
+                            style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -266,6 +257,59 @@ class _HeaderBackground extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(opacity)),
       );
+}
+
+/// Column ng LAUNDRYLINK brand + Full Name + Mobile Number — hiwalay na
+/// widget para malinaw ang responsibility. `crossAxisAlignment.start` para
+/// pare-pareho silang naka-left-align, at `mainAxisSize.min` para hindi
+/// umangkin ng sobrang taas sa loob ng Row.
+class _UserProfileText extends StatelessWidget {
+  const _UserProfileText({required this.customer});
+  final Customer customer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // LAUNDRYLINK brand — INIBALIK, dapat nandito pa rin.
+        RichText(
+          text: const TextSpan(
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic),
+            children: [
+              TextSpan(text: 'LAUNDRY', style: TextStyle(color: _kAccentCyan)),
+              TextSpan(text: 'LINK', style: TextStyle(color: _kAccentGold)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        // Full Name — FontWeight.bold, fontSize 16, white.
+        Text(
+          customer.fullName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 2),
+        // Mobile Number — FontWeight.normal, fontSize 12, white70.
+        Text(
+          customer.mobileNumber,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.normal,
+            fontSize: 12,
+            color: Colors.white70,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _HeaderIconButton extends StatelessWidget {

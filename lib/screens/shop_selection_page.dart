@@ -78,32 +78,38 @@ class _ShopSelectionPageState extends State<ShopSelectionPage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search shops',
-                hintStyle: TextStyle(color: colors.textMuted),
-                prefixIcon: Icon(Icons.search_rounded, color: colors.textSecondary),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: Icon(Icons.close_rounded, color: colors.textSecondary, size: 18),
-                        onPressed: () => _searchController.clear(),
-                      ),
-                filled: true,
-                fillColor: colors.surface,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 4),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: colors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: colors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: colors.primary, width: 1.4),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 12, offset: const Offset(0, 4))],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search shops',
+                  hintStyle: TextStyle(color: colors.textMuted),
+                  prefixIcon: Icon(Icons.search_rounded, color: colors.textSecondary),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: Icon(Icons.close_rounded, color: colors.textSecondary, size: 18),
+                          onPressed: () => _searchController.clear(),
+                        ),
+                  filled: true,
+                  fillColor: colors.surface,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 4),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: colors.primary, width: 1.4),
+                  ),
                 ),
               ),
             ),
@@ -149,7 +155,7 @@ class _ShopSelectionPageState extends State<ShopSelectionPage> {
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
                     itemCount: shops.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) => _ShopListTile(shop: shops[index]),
                   ),
                 );
@@ -171,7 +177,7 @@ class _ShopListTile extends StatelessWidget {
     final colors = context.colors;
 
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(18),
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => ShopDetailPage(shopId: shop.id, shopPreview: shop)),
@@ -180,8 +186,9 @@ class _ShopListTile extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: colors.border, width: 1),
+          boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 14, offset: const Offset(0, 5))],
         ),
         child: Row(
           children: [
@@ -189,17 +196,24 @@ class _ShopListTile extends StatelessWidget {
             // tinted square (rounded, not a circle) so it reads as a
             // shop "tile" rather than a decorative avatar.
             Container(
-              width: 52,
-              height: 52,
+              width: 54,
+              height: 54,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: shop.isOnline ? colors.chipBg : colors.neutralBg,
-                borderRadius: BorderRadius.circular(12),
+                gradient: shop.isOnline
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [colors.chipBg, colors.primary.withOpacity(0.2)],
+                      )
+                    : null,
+                color: shop.isOnline ? null : colors.neutralBg,
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
                 Icons.local_laundry_service_rounded,
                 color: shop.isOnline ? colors.primary : colors.neutral,
-                size: 24,
+                size: 25,
               ),
             ),
             const SizedBox(width: 14),
@@ -220,17 +234,26 @@ class _ShopListTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       _StatusBadge(isOnline: shop.isOnline),
                       if (shop.distanceKm != null) ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.directions_walk_rounded, size: 13, color: colors.textMuted),
-                        const SizedBox(width: 2),
-                        Text(
-                          '${shop.distanceKm!.toStringAsFixed(1)} km',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colors.textMuted),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(20)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.directions_walk_rounded, size: 12, color: colors.primary),
+                              const SizedBox(width: 3),
+                              Text(
+                                '${shop.distanceKm!.toStringAsFixed(1)} km',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: colors.primary),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],
@@ -239,7 +262,13 @@ class _ShopListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded, color: colors.textMuted),
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
+              child: Icon(Icons.chevron_right_rounded, size: 18, color: colors.primary),
+            ),
           ],
         ),
       ),
@@ -255,19 +284,24 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final Color fg = isOnline ? colors.success : colors.neutral;
+    final Color bg = isOnline ? colors.successBg : colors.neutralBg;
     final String label = isOnline ? 'Open' : 'Closed';
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 5),
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: fg)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg)),
+        ],
+      ),
     );
   }
 }

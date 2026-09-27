@@ -1,19 +1,28 @@
+// ============================= lib/widgets/order_timeline_tracker.dart =============================
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/booking.dart';
 import '../theme/app_colors.dart';
 import 'countdown_timer.dart';
+import 'payment_action_modal.dart';
 
-/// MID SECTION — vertical timeline. 5 nodes para sa drop-off, 6 para sa
-/// delivery (dagdag ang "Courier Assigned for Pick-up" bago ang
-/// weighing node). Bawat node may timestamp; ang "Washing" node ay
-/// naglalaman ng CountdownTimer kapag kasalukuyang "In Progress".
+/// MID SECTION — vertical timeline. 5 nodes para sa drop-off, 6-7 para
+/// sa delivery. Dagdag ang "Payment" node sa pagitan ng "Weighed" at
+/// "Washing" — lumalabas lang kapag status == awaitingPayment, at
+/// naglalaman ng button na nagbubukas ng payment action modal.
 class OrderTimelineTracker extends StatelessWidget {
-  const OrderTimelineTracker({super.key, required this.booking});
+  const OrderTimelineTracker({super.key, required this.booking, required this.onRefresh});
+
   final Booking booking;
 
-  List<_Node> _buildNodes() {
+  /// Called after the payment modal closes (whether or not anything
+  /// changed) — triggers a silent parent re-fetch so a submitted proof
+  /// or a staff-side verification picked up mid-modal reflects
+  /// immediately rather than waiting for the next poll tick.
+  final VoidCallback onRefresh;
+
+  List<_Node> _buildNodes(BuildContext context) {
     final isDelivery = booking.fulfillmentMode == 'delivery';
     final nodes = <_Node>[
       _Node(
@@ -43,6 +52,28 @@ class OrderTimelineTracker extends StatelessWidget {
       timestamp: booking.weighedAt,
     ));
 
+    // NEW — Payment node. Only meaningfully "actionable" while the
+    // booking sits at Awaiting Payment; once paid, this node just
+    // shows as reached (timestamp = paidAt) with no button, same
+    // pattern as every other node.
+    if (booking.status == BookingStatus.awaitingPayment || booking.paidAt != null) {
+      nodes.add(_Node(
+        title: 'Payment',
+        description: booking.paidAt != null
+            ? 'Payment confirmed. Thank you!'
+            : (booking.paymentStatus == 'pending_verification'
+                ? 'Your payment is under review by the shop.'
+                : 'Your final bill is ready — please complete payment.'),
+        timestamp: booking.paidAt,
+        actionLabel: booking.paidAt == null
+            ? (booking.paymentStatus == 'pending_verification' ? 'View Receipt' : 'Pay Now')
+            : null,
+        onAction: booking.paidAt == null
+            ? () => showPaymentActionModal(context, booking: booking, onUpdated: onRefresh)
+            : null,
+      ));
+    }
+
     nodes.add(_Node(
       title: 'Washing & Drying In Progress',
       description: 'Your laundry is currently being cleaned.',
@@ -50,6 +81,7 @@ class OrderTimelineTracker extends StatelessWidget {
       countdownTarget: (booking.status == BookingStatus.inProgress && booking.estimatedCompletionTime != null)
           ? booking.estimatedCompletionTime
           : null,
+      countdownPhase: booking.activePhase,
     ));
 
     if (isDelivery) {
@@ -92,7 +124,7 @@ class OrderTimelineTracker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final nodes = _buildNodes();
+    final nodes = _buildNodes(context);
     final lastReachedIndex = nodes.lastIndexWhere((n) => n.timestamp != null);
 
     return Container(
@@ -184,7 +216,24 @@ class OrderTimelineTracker extends StatelessWidget {
                   ],
                   if (node.countdownTarget != null) ...[
                     const SizedBox(height: 10),
-                    CountdownTimer(targetTime: node.countdownTarget!),
+                    CountdownTimer(targetTime: node.countdownTarget!, phase: node.countdownPhase),
+                  ],
+                  if (node.actionLabel != null && node.onAction != null) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: node.onAction,
+                        icon: const Icon(Icons.payments_outlined, size: 16),
+                        label: Text(node.actionLabel!),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: colors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -204,6 +253,9 @@ class _Node {
     this.riderName,
     this.riderContact,
     this.countdownTarget,
+    this.countdownPhase,
+    this.actionLabel,
+    this.onAction,
   });
   final String title;
   final String description;
@@ -211,4 +263,7 @@ class _Node {
   final String? riderName;
   final String? riderContact;
   final DateTime? countdownTarget;
+  final String? countdownPhase;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 }

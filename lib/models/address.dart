@@ -1,3 +1,4 @@
+// ============================= lib/models/address.dart (walang binago — kompleto lang para sa reference) =============================
 /// Client-side model for a customer's saved address.
 /// Mirrors AddressResponse in app/schemas.py.
 class Address {

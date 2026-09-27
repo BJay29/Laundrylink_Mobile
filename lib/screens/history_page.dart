@@ -46,10 +46,6 @@ class _HistoryPageState extends State<HistoryPage> {
             return _EmptyState(onRefresh: _reload);
           }
 
-          // FIX: hindi na kailangan ng headerHeight dito — ang header sa
-          // MainNavPage ay hiwalay na row sa itaas ng buong page (hindi na
-          // Positioned/background), kaya normal na top padding lang ang
-          // kailangan para hindi masapawan ang unang item ng listahan.
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView.separated(
@@ -76,8 +72,16 @@ class _EmptyState extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(top: 60),
         children: [
-          Icon(Icons.history_rounded, size: 64, color: colors.primaryLight),
-          const SizedBox(height: 16),
+          Center(
+            child: Container(
+              width: 96,
+              height: 96,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
+              child: Icon(Icons.history_rounded, size: 44, color: colors.primary),
+            ),
+          ),
+          const SizedBox(height: 20),
           Text(
             'No bookings yet',
             textAlign: TextAlign.center,
@@ -87,7 +91,7 @@ class _EmptyState extends StatelessWidget {
           Text(
             'Your laundry orders will appear here once you book a service.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: colors.textSecondary),
+            style: TextStyle(color: colors.textSecondary, height: 1.4),
           ),
         ],
       ),
@@ -107,8 +111,14 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline_rounded, size: 40, color: colors.error),
-          const SizedBox(height: 12),
+          Container(
+            width: 72,
+            height: 72,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: colors.errorBg, shape: BoxShape.circle),
+            child: Icon(Icons.error_outline_rounded, size: 32, color: colors.error),
+          ),
+          const SizedBox(height: 14),
           Text('Failed to load your bookings', style: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(message, style: TextStyle(color: colors.textMuted, fontSize: 11.5)),
@@ -133,14 +143,24 @@ class _BookingHistoryCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 14, offset: const Offset(0, 4))],
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colors.border, width: 1),
+        boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 16, offset: const Offset(0, 5))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(14)),
+                child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 20),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -155,11 +175,22 @@ class _BookingHistoryCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(color: style.bg, borderRadius: BorderRadius.circular(20)),
-                child: Text(
-                  booking.status.label,
-                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: style.fg),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(color: style.fg, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      booking.status.label,
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: style.fg),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -188,6 +219,8 @@ class _BookingHistoryCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 12),
+          Divider(height: 1, color: colors.border),
           const SizedBox(height: 12),
           Row(
             children: [

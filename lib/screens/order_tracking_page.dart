@@ -111,7 +111,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF7F9FC),
       appBar: AppBar(title: const Text('Order Tracking')),
       body: RefreshIndicator(
         onRefresh: _handleRefresh,
@@ -182,7 +182,17 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
             booking.status == BookingStatus.awaitingPayment && booking.paymentMethod == 'cash')
           _buildCashDueBanner(booking),
 
-        _buildStaggeredStepper(booking),
+        Container(
+          padding: const EdgeInsets.fromLTRB(18, 20, 18, 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 6)),
+            ],
+          ),
+          child: _buildStaggeredStepper(booking),
+        ),
         const SizedBox(height: 24),
         if (booking.status == BookingStatus.cancelled || booking.status == BookingStatus.declined)
           _buildTerminalBanner(booking),
@@ -191,41 +201,59 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
   }
 
   Widget _buildHeader(Booking booking) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          booking.shopName,
-          style: const TextStyle(fontSize: 14, color: Colors.grey),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_kNeonBlueDark, _kNeonBlue],
         ),
-        const SizedBox(height: 4),
-        Text(
-          booking.serviceName,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          booking.status.label,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: _statusColor(booking.status),
-          ),
-        ),
-        if (booking.finalPrice != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Final total: ₱${booking.finalPrice!.toStringAsFixed(2)}',
-            style: const TextStyle(fontSize: 14),
-          ),
-        ] else if (booking.estimatedPrice != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Estimated: ₱${booking.estimatedPrice!.toStringAsFixed(2)} (pending weighing)',
-            style: const TextStyle(fontSize: 14, color: Colors.orange),
-          ),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(color: _kNeonBlue.withOpacity(0.30), blurRadius: 20, offset: const Offset(0, 10)),
         ],
-      ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            booking.shopName,
+            style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            booking.serviceName,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              booking.status.label,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+            ),
+          ),
+          if (booking.finalPrice != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Final total: ₱${booking.finalPrice!.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ] else if (booking.estimatedPrice != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Estimated: ₱${booking.estimatedPrice!.toStringAsFixed(2)} (pending weighing)',
+              style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.9)),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -240,13 +268,19 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _kNeonBlue.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _kNeonBlue.withOpacity(0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.payments_outlined, color: _kNeonBlueDark, size: 22),
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: _kNeonBlue.withOpacity(0.14), shape: BoxShape.circle),
+            child: const Icon(Icons.payments_outlined, color: _kNeonBlueDark, size: 19),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -269,7 +303,7 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.red.shade100),
       ),
       child: Row(
@@ -288,26 +322,6 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
         ],
       ),
     );
-  }
-
-  Color _statusColor(BookingStatus status) {
-    switch (status) {
-      case BookingStatus.ready:
-        return Colors.green;
-      case BookingStatus.claimed:
-        return Colors.blueGrey;
-      case BookingStatus.cancelled:
-      case BookingStatus.declined:
-        return Colors.red;
-      case BookingStatus.awaitingPayment:
-        return Colors.orange;
-      case BookingStatus.awaitingApproval:
-      case BookingStatus.awaitingWeighing:
-      case BookingStatus.pending:
-      case BookingStatus.inProgress:
-      case BookingStatus.unknown:
-        return _kNeonBlueDark;
-    }
   }
 
   /// Builds the 5-step vertical timeline with a staggered entrance:

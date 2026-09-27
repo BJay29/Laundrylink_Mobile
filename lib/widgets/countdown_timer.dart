@@ -1,28 +1,36 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 const Color _kNeonBlue = Color(0xFF00B8FF);
 
-/// Self-contained "In Progress" countdown widget (spec §4).
+/// Self-contained "In Progress" countdown widget.
 ///
 /// Computes the remaining time LOCALLY using
 /// `targetTime.difference(DateTime.now())` on a `Timer.periodic(1s)`
 /// tick — no repeated network polling. Displays "MM:SS", with a
-/// continuously pulsing neon-blue glow (BoxShadow blur/spread
-/// animation) to mimic a live washing-machine drum cycle.
+/// continuously pulsing neon-blue glow to mimic a live washing-machine
+/// drum cycle.
+///
+/// UPDATED (Booking & Order Tracking Flow Fix): two changes —
+///   1. Sizing reduced across the board (padding, icon, digit font,
+///      glow radius) — the previous version was oversized for a card
+///      embedded inside a timeline node.
+///   2. Accepts an optional [phase] ("washing" | "drying") so the
+///      label reflects what's actually happening — previously always
+///      hardcoded to "Washing In Progress" even once a load had moved
+///      to the dryer.
 ///
 /// Once the countdown hits zero, the timer is cancelled and the label
-/// switches to "Cycles Complete - Wrapping Up...".
+/// switches to "Cycle Complete - Wrapping Up...".
 class CountdownTimer extends StatefulWidget {
-  const CountdownTimer({super.key, required this.targetTime});
+  const CountdownTimer({super.key, required this.targetTime, this.phase});
 
-  /// The estimated completion time (booking.estimatedCompletionTime),
-  /// already in local time or UTC — DateTime.difference() works
-  /// correctly either way since both sides of the subtraction must
-  /// just be consistent, and DateTime.now() is local.
+  /// The estimated completion time (booking.estimatedCompletionTime).
   final DateTime targetTime;
+
+  /// "washing" | "drying" | null (defaults to "washing" label if null).
+  final String? phase;
 
   @override
   State<CountdownTimer> createState() => _CountdownTimerState();
@@ -60,8 +68,6 @@ class _CountdownTimerState extends State<CountdownTimer> with SingleTickerProvid
         _remaining = Duration.zero;
         _isComplete = true;
       });
-      // DESTRUCTOR CYCLE HANG GUARD — stop the loop the instant we hit
-      // zero, never let it tick into negative durations.
       timer.cancel();
       return;
     }
@@ -72,9 +78,10 @@ class _CountdownTimerState extends State<CountdownTimer> with SingleTickerProvid
   @override
   void didUpdateWidget(covariant CountdownTimer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If a fresh Realtime push brings a NEW target time (e.g. staff
-    // re-assigned a machine), restart the local loop against the new
-    // target rather than keep counting down the stale one.
+    // If a fresh push brings a NEW target time (e.g. staff moved this
+    // load to the dryer, resetting the cycle), restart the local loop
+    // against the new target rather than keep counting down the stale
+    // one.
     if (oldWidget.targetTime != widget.targetTime) {
       _timer?.cancel();
       final remaining = widget.targetTime.difference(DateTime.now());
@@ -90,19 +97,27 @@ class _CountdownTimerState extends State<CountdownTimer> with SingleTickerProvid
 
   @override
   void dispose() {
-    // Required lifecycle guard — never leave a Timer.periodic running
-    // past this widget's life, or it keeps firing setState() on a
-    // disposed State and crashes.
     _timer?.cancel();
     _glowController.dispose();
     super.dispose();
   }
 
   String get _formatted {
-    if (_isComplete) return 'Cycles Complete - Wrapping Up...';
+    if (_isComplete) return 'Cycle Complete';
     final minutes = _remaining.inMinutes.toString().padLeft(2, '0');
     final seconds = (_remaining.inSeconds % 60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  String get _label {
+    if (_isComplete) return 'Wrapping up';
+    final isDrying = widget.phase == 'drying';
+    return isDrying ? 'Drying in progress' : 'Washing in progress';
+  }
+
+  IconData get _icon {
+    final isDrying = widget.phase == 'drying';
+    return isDrying ? Icons.dry_rounded : Icons.local_laundry_service_rounded;
   }
 
   @override
@@ -110,17 +125,17 @@ class _CountdownTimerState extends State<CountdownTimer> with SingleTickerProvid
     return AnimatedBuilder(
       animation: _glowController,
       builder: (context, child) {
-        final glowStrength = _isComplete ? 0.0 : (0.25 + _glowController.value * 0.35);
-        final blur = _isComplete ? 0.0 : (10 + _glowController.value * 14);
-        final spread = _isComplete ? 0.0 : (1 + _glowController.value * 3);
+        final glowStrength = _isComplete ? 0.0 : (0.20 + _glowController.value * 0.25);
+        final blur = _isComplete ? 0.0 : (6 + _glowController.value * 8);
+        final spread = _isComplete ? 0.0 : (0.5 + _glowController.value * 1.5);
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _kNeonBlue.withOpacity(0.35)),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _kNeonBlue.withOpacity(0.3)),
             boxShadow: [
               BoxShadow(
                 color: _kNeonBlue.withOpacity(glowStrength),
@@ -129,31 +144,32 @@ class _CountdownTimerState extends State<CountdownTimer> with SingleTickerProvid
               ),
             ],
           ),
-          child: Column(
+          child: Row(
             children: [
               Icon(
-                Icons.local_laundry_service_rounded,
+                _icon,
                 color: _isComplete ? Colors.grey : _kNeonBlue,
-                size: 26,
+                size: 18,
               ),
-              const SizedBox(height: 10),
-              Text(
-                _isComplete ? 'Almost Done' : 'Washing In Progress',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade600,
-                  letterSpacing: 0.4,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _label,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
               Text(
                 _formatted,
                 style: TextStyle(
-                  fontSize: _isComplete ? 15 : 32,
+                  fontSize: _isComplete ? 12 : 18,
                   fontWeight: FontWeight.bold,
                   color: _isComplete ? Colors.grey.shade700 : const Color(0xFF0091EA),
-                  letterSpacing: 1.2,
+                  letterSpacing: 0.6,
                 ),
               ),
             ],

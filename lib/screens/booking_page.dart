@@ -3,15 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
-import '../models/shop.dart';
 import '../services/api_service.dart';
 import '../services/booking_service.dart';
-import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/collapsible_invoice_card.dart';
 import '../widgets/live_status_banner.dart';
 import '../widgets/order_timeline_tracker.dart';
-import '../widgets/qr_payment_card.dart';
 import 'shop_selection_page.dart';
 
 class BookingPage extends StatelessWidget {
@@ -230,9 +227,11 @@ class _BookingsContentState extends State<_BookingsContent> {
   }
 }
 
-/// Isang booking card, ngayon nasa TOP / MID / BOTTOM na disenyo:
-///   TOP    — LiveStatusBanner (+ payment section kung Awaiting Payment)
-///   MID    — OrderTimelineTracker (buong vertical stepper)
+/// Isang booking card, TOP / MID / BOTTOM na disenyo:
+///   TOP    — LiveStatusBanner
+///   MID    — OrderTimelineTracker (buong vertical stepper, kasama na
+///            ngayon ang Payment node/modal trigger — walang hiwalay
+///            na payment section sa labas ng timeline)
 ///   BOTTOM — CollapsibleInvoiceCard, at hiwalay na Cancel button
 class _BookingCard extends StatefulWidget {
   const _BookingCard({super.key, required this.booking, required this.onRefresh});
@@ -250,9 +249,6 @@ class _BookingCardState extends State<_BookingCard> {
 
   bool get _isCancellable =>
       widget.booking.status == BookingStatus.awaitingApproval || widget.booking.status == BookingStatus.pending;
-
-  bool get _needsPaymentAction =>
-      widget.booking.status == BookingStatus.awaitingPayment && widget.booking.paymentStatus != 'paid';
 
   Future<void> _confirmAndCancel() async {
     final colors = context.colors;
@@ -307,7 +303,6 @@ class _BookingCardState extends State<_BookingCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // TOP — Hero tag matches BookingConfirmationPage's check-circle.
         Hero(
           tag: 'booking-${booking.id}-header',
           child: Material(
@@ -316,19 +311,14 @@ class _BookingCardState extends State<_BookingCard> {
           ),
         ),
 
-        if (_needsPaymentAction) ...[
-          const SizedBox(height: 14),
-          _ShopQrPaymentSection(booking: booking, onUpdated: widget.onRefresh),
-        ],
+        const SizedBox(height: 14),
+
+        // MID — full vertical timeline, now including the Payment node
+        // + modal trigger (see OrderTimelineTracker).
+        OrderTimelineTracker(booking: booking, onRefresh: widget.onRefresh),
 
         const SizedBox(height: 14),
 
-        // MID — full vertical timeline.
-        OrderTimelineTracker(booking: booking),
-
-        const SizedBox(height: 14),
-
-        // BOTTOM — collapsible invoice.
         CollapsibleInvoiceCard(booking: booking),
 
         if (_isCancellable) ...[
@@ -351,79 +341,6 @@ class _BookingCardState extends State<_BookingCard> {
           ),
         ],
       ],
-    );
-  }
-}
-
-/// Kinukuha lang yung shop (para sa QR image), tapos ipinapasa papunta
-/// kay QrPaymentCard.
-class _ShopQrPaymentSection extends StatefulWidget {
-  const _ShopQrPaymentSection({required this.booking, required this.onUpdated});
-
-  final Booking booking;
-  final VoidCallback onUpdated;
-
-  @override
-  State<_ShopQrPaymentSection> createState() => _ShopQrPaymentSectionState();
-}
-
-class _ShopQrPaymentSectionState extends State<_ShopQrPaymentSection> {
-  Shop? _shop;
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadShop();
-  }
-
-  Future<void> _loadShop() async {
-    final shopId = widget.booking.shopId;
-    if (shopId == null) {
-      setState(() {
-        _loading = false;
-        _error = 'Missing shop reference for this booking.';
-      });
-      return;
-    }
-    try {
-      final shop = await ShopService().getShopDetail(shopId);
-      if (!mounted) return;
-      setState(() {
-        _shop = shop;
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = "Unable to load the shop's QR code right now.";
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-
-    if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 20),
-          child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
-        ),
-      );
-    }
-
-    if (_error != null) {
-      return Text(_error!, style: TextStyle(fontSize: 12, color: colors.textMuted));
-    }
-
-    return QrPaymentCard(
-      booking: widget.booking,
-      qrCodeUrl: _shop?.qrCodeUrl,
-      onSubmitted: widget.onUpdated,
     );
   }
 }

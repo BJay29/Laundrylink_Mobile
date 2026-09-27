@@ -12,6 +12,7 @@ import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/booking_status_tracker.dart';
 import '../widgets/illustrated_icon.dart';
+import '../widgets/promo_carousel.dart';
 import 'booking_page.dart';
 import 'shop_detail_page.dart';
 
@@ -100,7 +101,7 @@ class _HomePageState extends State<HomePage> {
 
     final Widget topCard = _activeBooking != null
         ? InkWell(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(22),
             onTap: _openActiveBookingTracking,
             child: _CardShell(child: BookingStatusTracker(booking: _activeBooking!)),
           )
@@ -109,35 +110,60 @@ class _HomePageState extends State<HomePage> {
     return RefreshIndicator(
       onRefresh: _reload,
       child: ListView(
-        // FIX: ang header ay hiwalay na row na sa itaas ng MainNavPage
-        // (hindi na Positioned background), kaya normal na top padding na
-        // lang ang kailangan dito — wala nang overlap/negative-offset na
-        // "peek" trick para hindi na rin masapawan ang laman ng card ng
-        // border ng header.
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
         children: [
           topCard,
           const SizedBox(height: 28),
           Text(
             'Hi ${customer.fullName.split(' ').first}, ready for fresh laundry?',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: colors.textPrimary),
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: colors.textPrimary, height: 1.2),
           ),
           const SizedBox(height: 8),
           Text(
             'Create a booking and track every step of your laundry order.',
             style: TextStyle(color: colors.textSecondary, height: 1.45),
           ),
-          const SizedBox(height: 28),
-          Text(
-            'Quick overview',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
+          // NEW (Home page promo carousel) — reuses the SAME _shopsFuture
+          // already being fetched for "Nearby shops" below, so this adds
+          // zero extra network calls. Renders nothing at all (no heading,
+          // no empty-state) when no shop currently has an active promo —
+          // this section simply doesn't exist for a customer if there's
+          // nothing to advertise.
+          FutureBuilder<List<Shop>>(
+            future: _shopsFuture,
+            builder: (context, snapshot) {
+              final shopsWithPromos = (snapshot.data ?? [])
+                  .where((s) => s.activePromos.isNotEmpty)
+                  .toList();
+              if (shopsWithPromos.isEmpty) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(top: 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SectionHeading(title: 'Promos for you'),
+                    const SizedBox(height: 14),
+                    PromoCarousel(
+                      shops: shopsWithPromos,
+                      onShopTap: (shop) => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => ShopDetailPage(shopId: shop.id, shopPreview: shop)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
+          const SizedBox(height: 28),
+          _SectionHeading(title: 'Quick overview'),
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
                 child: _OverviewCard(
-                  icon: Icons.receipt_long_outlined,
+                  icon: Icons.receipt_long_rounded,
                   label: 'Bookings',
                   value: '$_totalBookingsCount',
                   color: colors.primary,
@@ -147,7 +173,7 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(width: 12),
               Expanded(
                 child: _OverviewCard(
-                  icon: Icons.check_circle_outline,
+                  icon: Icons.check_circle_rounded,
                   label: 'Completed',
                   value: '$_completedCount',
                   color: colors.success,
@@ -157,18 +183,10 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 28),
-          Text(
-            'Nearby shops',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Browse shops and book your laundry.',
-            style: TextStyle(fontSize: 13, color: colors.textSecondary),
-          ),
+          _SectionHeading(title: 'Nearby shops', subtitle: 'Browse shops and book your laundry.'),
           const SizedBox(height: 14),
           SizedBox(
-            height: 190,
+            height: 196,
             child: FutureBuilder<List<Shop>>(
               future: _shopsFuture,
               builder: (context, snapshot) {
@@ -206,9 +224,33 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// Simpleng shadow/rounded-corner shell na lang ito ngayon — wala nang
-/// negative-offset overlap trick, dahil hindi na kailangang "umakyat"
-/// papasok sa header. Header at body ay magkahiwalay nang maayos.
+/// Reusable section title (+ optional subtitle underneath), used above
+/// "Quick overview" and "Nearby shops" so both sections share the exact
+/// same header rhythm.
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({required this.title, this.subtitle});
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary)),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(subtitle!, style: TextStyle(fontSize: 13, color: colors.textSecondary)),
+        ],
+      ],
+    );
+  }
+}
+
+/// Rounded-corner + soft-shadow shell used for both the active-booking
+/// tracker and the "no active booking" banner, so the two states share
+/// the exact same silhouette when they swap.
 class _CardShell extends StatelessWidget {
   const _CardShell({required this.child});
   final Widget child;
@@ -216,13 +258,13 @@ class _CardShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 22, offset: const Offset(0, 10)),
+            BoxShadow(color: Colors.black.withOpacity(0.16), blurRadius: 24, offset: const Offset(0, 12)),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           child: child,
         ),
       );
@@ -234,7 +276,7 @@ class _NoActiveBookingBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [colors.primary, colors.primaryLight],
@@ -250,10 +292,14 @@ class _NoActiveBookingBanner extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 58,
+                  height: 58,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1.4),
+                  ),
                   child: const Icon(Icons.local_laundry_service_rounded, color: Colors.white, size: 28),
                 ),
                 const SizedBox(width: 16),
@@ -263,6 +309,7 @@ class _NoActiveBookingBanner extends StatelessWidget {
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, height: 1.45),
                   ),
                 ),
+                Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.7)),
               ],
             ),
           ],
@@ -309,26 +356,34 @@ class _OverviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: bgColor, width: 1.5),
-        boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 10, offset: const Offset(0, 4))],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colors.surface, bgColor.withOpacity(0.35)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: bgColor, width: 1.4),
+        boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 12, offset: const Offset(0, 6))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 18),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 19),
           ),
-          const SizedBox(height: 14),
-          Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: colors.textPrimary)),
-          Text(label, style: TextStyle(color: colors.textSecondary)),
+          const SizedBox(height: 16),
+          Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: colors.textPrimary)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(color: colors.textSecondary, fontSize: 12.5, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -343,7 +398,7 @@ class _ShopCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(20),
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => ShopDetailPage(shopId: shop.id, shopPreview: shop)),
@@ -351,16 +406,17 @@ class _ShopCard extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: colors.surface,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 16, offset: const Offset(0, 5))],
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: colors.border, width: 1),
+          boxShadow: [BoxShadow(color: colors.shadowStrong, blurRadius: 18, offset: const Offset(0, 6))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
               child: Container(
-                height: 6,
+                height: 8,
                 decoration: BoxDecoration(gradient: LinearGradient(colors: [colors.primary, colors.primaryLight])),
               ),
             ),
@@ -373,10 +429,17 @@ class _ShopCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        width: 44,
-                        height: 44,
+                        width: 46,
+                        height: 46,
                         alignment: Alignment.center,
-                        decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [colors.chipBg, colors.primary.withOpacity(0.18)],
+                          ),
+                          shape: BoxShape.circle,
+                        ),
                         child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 22),
                       ),
                       if (!shop.isOnline)
@@ -397,7 +460,7 @@ class _ShopCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(Icons.location_on_outlined, size: 14, color: colors.textSecondary),
+                      Icon(Icons.location_on_rounded, size: 14, color: colors.textSecondary),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
@@ -410,9 +473,9 @@ class _ShopCard extends StatelessWidget {
                     ],
                   ),
                   if (shop.distanceKm != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                       decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(20)),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,

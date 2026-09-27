@@ -1,8 +1,10 @@
+// ============================= lib/pages/saved_addresses_page.dart =============================
 import 'package:flutter/material.dart';
 
 import '../models/address.dart';
 import '../services/address_service.dart';
 import '../services/api_service.dart';
+import '../services/location_service.dart';
 import '../theme/app_colors.dart';
 
 class SavedAddressesPage extends StatefulWidget {
@@ -262,6 +264,22 @@ class _AddressCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(address.addressLine, style: TextStyle(fontSize: 12.5, color: colors.textSecondary, height: 1.4)),
+                // NEW: kung galing GPS ang address na ito (may lat/lng),
+                // ipinapakita ang maliit na "pin" indicator para malaman
+                // ng user na exact-location ang pinagmulan nito.
+                if (address.latitude != null && address.longitude != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.my_location_rounded, size: 11, color: colors.primary),
+                      const SizedBox(width: 4),
+                      Text(
+                        'From GPS location',
+                        style: TextStyle(fontSize: 10.5, color: colors.primary, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -304,11 +322,22 @@ class _AddressFormSheet extends StatefulWidget {
 
 class _AddressFormSheetState extends State<_AddressFormSheet> {
   final _formKey = GlobalKey<FormState>();
+  final LocationService _locationService = LocationService();
+
   late final TextEditingController _labelController;
   late final TextEditingController _addressController;
   bool _isDefault = false;
   bool _saving = false;
   String? _error;
+
+  // NEW (GPS auto-fill feature): coordinates na "nakadikit" sa kasalukuyang
+  // laman ng _addressController. Kapag manual na binago ng user ang text
+  // matapos mag-GPS, kino-clear namin ito (tingnan sa _addressController
+  // listener) para hindi ma-save ang lumang coordinates kasabay ng bagong
+  // text na hindi na tugma dito.
+  double? _latitude;
+  double? _longitude;
+  bool _fetchingLocation = false;
 
   @override
   void initState() {
@@ -316,13 +345,69 @@ class _AddressFormSheetState extends State<_AddressFormSheet> {
     _labelController = TextEditingController(text: widget.existing?.label ?? 'Home');
     _addressController = TextEditingController(text: widget.existing?.addressLine ?? '');
     _isDefault = widget.existing?.isDefault ?? false;
+    _latitude = widget.existing?.latitude;
+    _longitude = widget.existing?.longitude;
+
+    _addressController.addListener(_onAddressManuallyEdited);
   }
 
   @override
   void dispose() {
+    _addressController.removeListener(_onAddressManuallyEdited);
     _labelController.dispose();
     _addressController.dispose();
     super.dispose();
+  }
+
+  /// NEW: kapag ni-type ng user ang sarili niyang address (hindi galing
+  /// sa "Use my current location" fill), kino-clear ang naka-store na
+  /// lat/lng para hindi maligaw ang naka-save na coordinates sa text na
+  /// binago na niya.
+  void _onAddressManuallyEdited() {
+    if (_fetchingLocation) return; // habang kami mismo ang nagse-set ng text
+    if (_latitude != null || _longitude != null) {
+      setState(() {
+        _latitude = null;
+        _longitude = null;
+      });
+    }
+  }
+
+  /// NEW (GPS auto-fill feature): pinaka-puso ng feature na hiniling mo —
+  /// kinukuha ang GPS coordinates ng device, ino-reverse-geocode papunta
+  /// sa readable address, tapos awtomatikong pinupuno ang address field.
+  Future<void> _useCurrentLocation() async {
+    setState(() {
+      _fetchingLocation = true;
+      _error = null;
+    });
+
+    try {
+      final resolved = await _locationService.getCurrentLocationWithAddress();
+      if (!mounted) return;
+
+      setState(() {
+        _addressController.text = resolved.addressLine;
+        _latitude = resolved.latitude;
+        _longitude = resolved.longitude;
+        _fetchingLocation = false;
+      });
+    } on LocationException catch (e) {
+      if (!mounted) return;
+      setState(() => _fetchingLocation = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: context.colors.error),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _fetchingLocation = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Unable to get your current location. Please try again.'),
+          backgroundColor: context.colors.error,
+        ),
+      );
+    }
   }
 
   Future<void> _submit() async {
@@ -339,12 +424,16 @@ class _AddressFormSheetState extends State<_AddressFormSheet> {
           widget.existing!.id,
           label: _labelController.text.trim(),
           addressLine: _addressController.text.trim(),
+          latitude: _latitude,
+          longitude: _longitude,
           isDefault: _isDefault,
         );
       } else {
         await widget.addressService.createAddress(
           label: _labelController.text.trim(),
           addressLine: _addressController.text.trim(),
+          latitude: _latitude,
+          longitude: _longitude,
           isDefault: _isDefault,
         );
       }
@@ -393,6 +482,43 @@ class _AddressFormSheetState extends State<_AddressFormSheet> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: colors.textPrimary),
               ),
               const SizedBox(height: 16),
+
+              // NEW (GPS auto-fill feature): "Use my current location"
+              // button — pinaka-madaling paraan para awtomatikong mapunan
+              // ang address field, bago pa man mag-type ang user.
+              InkWell(
+                onTap: _fetchingLocation ? null : _useCurrentLocation,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: colors.chipBg,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.primary.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_fetchingLocation)
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
+                        )
+                      else
+                        Icon(Icons.my_location_rounded, size: 17, color: colors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        _fetchingLocation ? 'Getting your location…' : 'Use my current location',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colors.primary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _labelController,
                 decoration: const InputDecoration(labelText: 'Label (e.g. Home, Work)'),
@@ -401,7 +527,17 @@ class _AddressFormSheetState extends State<_AddressFormSheet> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _addressController,
-                decoration: const InputDecoration(labelText: 'Address'),
+                decoration: InputDecoration(
+                  labelText: 'Address',
+                  // NEW: maliit na "GPS-linked" indicator sa loob mismo ng
+                  // field, para malinaw sa user kung galing GPS ang laman.
+                  suffixIcon: (_latitude != null && _longitude != null)
+                      ? Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Icon(Icons.gps_fixed_rounded, size: 18, color: colors.primary),
+                        )
+                      : null,
+                ),
                 maxLines: 2,
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Address is required' : null,
               ),

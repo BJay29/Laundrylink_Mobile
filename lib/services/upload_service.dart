@@ -1,18 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
-import 'package:gal/gal.dart';
+import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'api_service.dart';
 import 'customer_session.dart';
+import 'gallery_download.dart';
 
 /// Handles file uploads to Supabase Storage via the backend's /uploads
 /// endpoints (see app/services/supabase_storage.py +
-/// app/routes/upload_routes.py), and saving a network image to the
-/// device's photo gallery.
+/// app/routes/upload_routes.py), and saving a network image locally
+/// (gallery on mobile, browser download on web).
 class UploadService {
   UploadService();
 
@@ -21,13 +23,14 @@ class UploadService {
   /// Uploads a payment-proof screenshot for [bookingId] to Supabase
   /// Storage (bucket "payment-proofs") via POST /uploads/payment-proof.
   /// Returns the public URL, which the caller then attaches to a
-  /// booking via BookingService.submitPaymentProof() (or, at creation
-  /// time, BookingService.createBooking's proofOfPaymentUrl param).
+  /// booking via BookingService.submitPaymentProof().
   ///
-  /// Requires the customer to be logged in — protected by
-  /// get_current_customer on the backend.
+  /// Uses `XFile` (image_picker's cross-platform file type) + bytes +
+  /// `http.MultipartFile.fromBytes()` — works identically on Flutter
+  /// Web AND mobile, unlike `File`/`fromPath()` which only work where
+  /// a real filesystem exists.
   Future<String> uploadPaymentProof({
-    required File imageFile,
+    required XFile imageFile,
     required int bookingId,
   }) async {
     final token = CustomerSession.instance.authToken;
@@ -35,14 +38,17 @@ class UploadService {
       throw const ApiException('You must be logged in to upload a file.', statusCode: 401);
     }
 
+    final Uint8List bytes = await imageFile.readAsBytes();
+
     final uri = Uri.parse('$_baseUrl/uploads/payment-proof');
     final request = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer $token'
       ..fields['booking_id'] = bookingId.toString()
-      ..files.add(await http.MultipartFile.fromPath(
+      ..files.add(http.MultipartFile.fromBytes(
         'file',
-        imageFile.path,
-        contentType: _mediaTypeForPath(imageFile.path),
+        bytes,
+        filename: imageFile.name,
+        contentType: _mediaTypeForPath(imageFile.name),
       ));
 
     final streamedResponse = await request.send().timeout(
@@ -70,28 +76,22 @@ class UploadService {
 
   /// Uploads the shop's SINGLE generic online-payment QR code image
   /// (web/staff-side use — Optimization Settings) via
-  /// POST /uploads/payment-qr. Requires a staff/owner session
-  /// (get_current_user on the backend), NOT a customer session — the
-  /// caller must supply [staffToken] directly since this method
-  /// doesn't use CustomerSession.
-  ///
-  /// UPDATED (online_qr consolidation): the 'provider' parameter
-  /// ("gcash" | "paymaya") has been REMOVED — a shop now has only ONE
-  /// QR code (National QR Ph style), matching the backend's
-  /// consolidated /uploads/payment-qr endpoint and Shop.qr_code_url
-  /// column. This method is included here for completeness in case a
-  /// future staff-facing screen reuses UploadService.
+  /// POST /uploads/payment-qr. Requires a staff/owner session — caller
+  /// supplies [staffToken] directly (no CustomerSession involved).
   Future<String> uploadShopQrCode({
-    required File imageFile,
+    required XFile imageFile,
     required String staffToken,
   }) async {
+    final Uint8List bytes = await imageFile.readAsBytes();
+
     final uri = Uri.parse('$_baseUrl/uploads/payment-qr');
     final request = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer $staffToken'
-      ..files.add(await http.MultipartFile.fromPath(
+      ..files.add(http.MultipartFile.fromBytes(
         'file',
-        imageFile.path,
-        contentType: _mediaTypeForPath(imageFile.path),
+        bytes,
+        filename: imageFile.name,
+        contentType: _mediaTypeForPath(imageFile.name),
       ));
 
     final streamedResponse = await request.send().timeout(
@@ -117,12 +117,12 @@ class UploadService {
     return url;
   }
 
-  /// Downloads the image at [imageUrl] and saves it to the device's
-  /// photo gallery — backs the "[⬇️ Save QR Image to Gallery]" button
-  /// in qr_payment_card.dart / booking_payment_page.dart.
-  ///
-  /// Uses the `gal` package, which handles the Android/iOS gallery
-  /// write permission prompts internally.
+  /// FIXED (works on web AND mobile now): Downloads the image at
+  /// [imageUrl], then hands the bytes to `saveBytesToGallery()` —
+  /// which resolves at compile time to either the mobile (gal /
+  /// device photo gallery) or web (browser file download)
+  /// implementation via gallery_download.dart's conditional export.
+  /// Callers don't need to know or care which platform they're on.
   Future<void> saveNetworkImageToGallery(String imageUrl) async {
     final http.Response response;
     try {
@@ -140,29 +140,11 @@ class UploadService {
       );
     }
 
-    final tempDir = await getTemporaryDirectory();
     final fileName = 'qr_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    final tempFile = File('${tempDir.path}/$fileName');
-    await tempFile.writeAsBytes(response.bodyBytes);
-
-    final hasAccess = await Gal.hasAccess();
-    if (!hasAccess) {
-      final granted = await Gal.requestAccess();
-      if (!granted) {
-        throw const ApiException(
-          'Gallery access was denied. Please enable photo permissions in Settings.',
-          statusCode: 403,
-        );
-      }
-    }
-
-    await Gal.putImage(tempFile.path, album: 'Laundry App');
+    await saveBytesToGallery(response.bodyBytes, fileName);
   }
 
-  /// Best-effort content-type guess from a file path's extension, since
-  /// image_picker doesn't always expose a reliable MIME type directly.
-  /// Defaults to JPEG — a safe fallback the backend's
-  /// ALLOWED_IMAGE_CONTENT_TYPES set (jpeg/jpg/png/webp) also accepts.
+  /// Best-effort content-type guess from a file name's extension.
   MediaType _mediaTypeForPath(String path) {
     final lower = path.toLowerCase();
     if (lower.endsWith('.png')) return MediaType('image', 'png');

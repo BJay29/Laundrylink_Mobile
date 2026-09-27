@@ -66,64 +66,60 @@ class ProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
 
-    // FIX: hindi na kailangan ng headerHeight — hiwalay na row na ang
-    // header sa MainNavPage (Column layout, hindi na Positioned
-    // background), kaya normal na top padding lang ang kailangan para
-    // hindi matakpan ang avatar/pangalan sa taas.
-    return ListView(padding: const EdgeInsets.fromLTRB(20, 20, 20, 20), children: [
+    return ListView(padding: const EdgeInsets.fromLTRB(20, 24, 20, 20), children: [
       Center(
-        child: CircleAvatar(
-          radius: 42,
-          backgroundColor: colors.chipBg,
-          child: Text(customer.initials, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: colors.textPrimary)),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(colors: [colors.primary, colors.primaryLight]),
+          ),
+          child: CircleAvatar(
+            radius: 42,
+            backgroundColor: colors.surface,
+            child: Text(
+              customer.initials,
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: colors.primary),
+            ),
+          ),
         ),
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 16),
       Text(customer.fullName, textAlign: TextAlign.center, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: colors.textPrimary)),
       const SizedBox(height: 4),
       Text(customer.mobileNumber, textAlign: TextAlign.center, style: TextStyle(color: colors.textSecondary)),
       const SizedBox(height: 28),
-      Card(
-        color: colors.surface,
-        child: Column(children: [
-          ListTile(
-            leading: Icon(Icons.person_outline, color: colors.textPrimary),
-            title: Text('Personal information', style: TextStyle(color: colors.textPrimary)),
-            trailing: Icon(Icons.chevron_right, color: colors.textMuted),
-            onTap: () => _openPersonalInformation(context),
-          ),
-          Divider(height: 1, color: colors.border),
-          ListTile(
-            leading: Icon(Icons.location_on_outlined, color: colors.textPrimary),
-            title: Text('Saved addresses', style: TextStyle(color: colors.textPrimary)),
-            trailing: Icon(Icons.chevron_right, color: colors.textMuted),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SavedAddressesPage()),
-            ),
-          ),
-          Divider(height: 1, color: colors.border),
-          ListTile(
-            leading: Icon(Icons.settings_outlined, color: colors.textPrimary),
-            title: Text('Settings', style: TextStyle(color: colors.textPrimary)),
-            trailing: Icon(Icons.chevron_right, color: colors.textMuted),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsPage()),
-            ),
-          ),
-        ]),
-      ),
+      _SettingsCard(colors: colors, children: [
+        _SettingsTile(
+          icon: Icons.person_outline_rounded,
+          label: 'Personal information',
+          onTap: () => _openPersonalInformation(context),
+        ),
+        _SettingsDivider(colors: colors),
+        _SettingsTile(
+          icon: Icons.location_on_outlined,
+          label: 'Saved addresses',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedAddressesPage())),
+        ),
+        _SettingsDivider(colors: colors),
+        _SettingsTile(
+          icon: Icons.settings_outlined,
+          label: 'Settings',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
+        ),
+      ]),
       const SizedBox(height: 16),
-      Card(
-        color: colors.surface,
-        child: ListTile(
-          leading: Icon(Icons.logout_rounded, color: colors.error),
-          title: Text('Log out', style: TextStyle(color: colors.error, fontWeight: FontWeight.w600)),
+      _SettingsCard(colors: colors, children: [
+        _SettingsTile(
+          icon: Icons.logout_rounded,
+          label: 'Log out',
+          iconColor: colors.error,
+          labelColor: colors.error,
+          showChevron: false,
           onTap: () => _confirmLogout(context),
         ),
-      ),
-      const SizedBox(height: 20),
+      ]),
+      const SizedBox(height: 24),
       Center(
         child: Text(
           'LaundryLink v$_kAppVersion',
@@ -131,5 +127,88 @@ class ProfilePage extends StatelessWidget {
         ),
       ),
     ]);
+  }
+}
+
+/// Rounded card shell shared by both settings groups, so the account
+/// section and the log-out section read as the same "family" of card
+/// instead of a plain Material [Card].
+class _SettingsCard extends StatelessWidget {
+  const _SettingsCard({required this.colors, required this.children});
+  final AppColors colors;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.border),
+          boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 14, offset: const Offset(0, 6))],
+        ),
+        child: Column(children: children),
+      );
+}
+
+class _SettingsDivider extends StatelessWidget {
+  const _SettingsDivider({required this.colors});
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) => Divider(height: 1, indent: 16, endIndent: 16, color: colors.border);
+}
+
+class _SettingsTile extends StatelessWidget {
+  const _SettingsTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.iconColor,
+    this.labelColor,
+    this.showChevron = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? iconColor;
+  final Color? labelColor;
+  final bool showChevron;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final Color resolvedIconColor = iconColor ?? colors.primary;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: resolvedIconColor.withOpacity(0.12), shape: BoxShape.circle),
+              child: Icon(icon, size: 19, color: resolvedIconColor),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: labelColor ?? colors.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14.5,
+                ),
+              ),
+            ),
+            if (showChevron) Icon(Icons.chevron_right_rounded, color: colors.textMuted),
+          ],
+        ),
+      ),
+    );
   }
 }
