@@ -62,4 +62,27 @@ class NotificationService {
 
     await _api.patch('/notifications/mark-all-read', const {}, token: token);
   }
+
+  /// NEW (swipe-to-dismiss feature) — permanently deletes/hides a
+  /// single notification for the logged-in customer. Assumes a
+  /// DELETE /notifications/{id} route on the backend, protected by
+  /// get_current_customer, mirroring the pattern of every other route
+  /// in this service (markAsRead uses PATCH .../{id}/read, this uses
+  /// DELETE .../{id}).
+  ///
+  /// IMPORTANT: this backend route does not exist yet in the files
+  /// shared so far — you'll need to add a matching DELETE endpoint on
+  /// the FastAPI side (e.g. delete_notification() in
+  /// notification_controller.py + the route in notification_routes.py)
+  /// that checks the notification belongs to the current customer
+  /// before deleting, the same way cancel_customer_booking() checks
+  /// ownership before cancelling a booking.
+  Future<void> deleteNotification(int notificationId) async {
+    final token = CustomerSession.instance.authToken;
+    if (token == null) {
+      throw const ApiException('You must be logged in.', statusCode: 401);
+    }
+
+    await _api.delete('/notifications/$notificationId', token: token);
+  }
 }

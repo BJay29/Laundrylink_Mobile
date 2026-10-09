@@ -13,6 +13,7 @@ import '../theme/app_colors.dart';
 import '../widgets/booking_status_tracker.dart';
 import '../widgets/illustrated_icon.dart';
 import '../widgets/promo_carousel.dart';
+import '../widgets/rating_badge.dart';
 import 'booking_page.dart';
 import 'shop_detail_page.dart';
 
@@ -397,6 +398,8 @@ class _ShopCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final hasRating = RatingBadge.hasRating(shop.averageRating, shop.ratingCount);
+
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () => Navigator.push(
@@ -442,12 +445,25 @@ class _ShopCard extends StatelessWidget {
                         ),
                         child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 22),
                       ),
-                      if (!shop.isOnline)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: colors.neutralBg, borderRadius: BorderRadius.circular(20)),
-                          child: Text('Closed', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral)),
-                        ),
+                      // UPDATED (Rating after order) — rating badge (at ang
+                      // "Closed" pill, kung sarado) ay nasa kanang bahagi
+                      // ng itaas na hanay, kaya HINDI nadadagdagan ang
+                      // taas ng card (nakapirmi sa 196 ang taas ng hanay
+                      // ng shop cards sa itaas).
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (hasRating)
+                            RatingBadge(averageRating: shop.averageRating, ratingCount: shop.ratingCount),
+                          if (hasRating && !shop.isOnline) const SizedBox(width: 6),
+                          if (!shop.isOnline)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(color: colors.neutralBg, borderRadius: BorderRadius.circular(20)),
+                              child: Text('Closed', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral)),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),

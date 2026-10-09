@@ -9,6 +9,8 @@ import '../theme/app_colors.dart';
 import '../widgets/collapsible_invoice_card.dart';
 import '../widgets/live_status_banner.dart';
 import '../widgets/order_timeline_tracker.dart';
+import '../widgets/rating_card.dart';
+import 'edit_booking_page.dart';
 import 'shop_selection_page.dart';
 
 class BookingPage extends StatelessWidget {
@@ -228,11 +230,12 @@ class _BookingsContentState extends State<_BookingsContent> {
 }
 
 /// Isang booking card, TOP / MID / BOTTOM na disenyo:
-///   TOP    — LiveStatusBanner
+///   TOP    — LiveStatusBanner (+ "Edit" affordance habang Awaiting
+///            Approval pa lang — see _canEdit below)
 ///   MID    — OrderTimelineTracker (buong vertical stepper, kasama na
-///            ngayon ang Payment node/modal trigger — walang hiwalay
-///            na payment section sa labas ng timeline)
-///   BOTTOM — CollapsibleInvoiceCard, at hiwalay na Cancel button
+///            ngayon ang Payment node/modal trigger)
+///   BOTTOM — CollapsibleInvoiceCard, Edit/Cancel buttons, at (para sa
+///            "Claimed" na booking) ang RatingCard
 class _BookingCard extends StatefulWidget {
   const _BookingCard({super.key, required this.booking, required this.onRefresh});
 
@@ -249,6 +252,37 @@ class _BookingCardState extends State<_BookingCard> {
 
   bool get _isCancellable =>
       widget.booking.status == BookingStatus.awaitingApproval || widget.booking.status == BookingStatus.pending;
+
+  /// NEW (Flexible Booking — Edit Booking feature) — "Edit booking"
+  /// lumalabas lang habang naghihintay pa ng Accept/Decline ang shop.
+  /// Ito yung dating _canEdit sa order_tracking_page.dart — inilipat
+  /// dito dahil OrderTrackingPage ay hindi na ginagamit ng navigation
+  /// (booking_page.dart/BookingPageScaffold na ang tumatawag mula
+  /// home_page.dart/booking_confirmation_page.dart/notifications), kaya
+  /// dati walang lugar na makikita ang button na ito.
+  bool get _canEdit => widget.booking.status == BookingStatus.awaitingApproval;
+
+  /// NEW (Rating after order) — ipinapakita ang RatingCard kapag
+  /// "Claimed" na ang booking (tapos na at kinuha na ang laundry). Ang
+  /// card mismo ang nagpapasya kung form (hindi pa rated) o read-only
+  /// na bituin (rated na) ang ipapakita.
+  bool get _canRate => widget.booking.status == BookingStatus.claimed && widget.booking.id != null;
+
+  /// NEW — opens EditBookingPage. Walang [Shop] object na ipinapasa
+  /// dito dahil ang listahan ng bookings (getMyBookings()) ay hindi
+  /// nagdadala ng buong shop detail per row — kaya ang EditBookingPage
+  /// ay babalik sa read-only na display ng kasalukuyang payment method
+  /// (see _buildPaymentSection doon: `if (widget.shop == null) ...`).
+  /// Kung gusto mong ma-edit din ang payment method mula rito, kailangan
+  /// muna nating i-fetch ang Shop detail base sa booking.shopId bago
+  /// buksan ang page — sabihin mo lang kung priority ito.
+  Future<void> _openEdit() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => EditBookingPage(booking: widget.booking)),
+    );
+    if (!mounted) return;
+    widget.onRefresh();
+  }
 
   Future<void> _confirmAndCancel() async {
     final colors = context.colors;
@@ -313,31 +347,63 @@ class _BookingCardState extends State<_BookingCard> {
 
         const SizedBox(height: 14),
 
-        // MID — full vertical timeline, now including the Payment node
-        // + modal trigger (see OrderTimelineTracker).
+        // MID — full vertical timeline, kasama na ang Payment node +
+        // modal trigger (see OrderTimelineTracker).
         OrderTimelineTracker(booking: booking, onRefresh: widget.onRefresh),
 
         const SizedBox(height: 14),
 
         CollapsibleInvoiceCard(booking: booking),
 
-        if (_isCancellable) ...[
+        // NEW (Rating after order) — "Rate your experience" para sa
+        // Claimed na booking. Pagkatapos mag-submit, nagre-refresh ang
+        // listahan (onRefresh) para dumating ang hasRated mula sa backend.
+        if (_canRate) ...[
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _cancelling ? null : _confirmAndCancel,
-              icon: _cancelling
-                  ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: colors.error))
-                  : const Icon(Icons.close_rounded, size: 16),
-              label: Text(_cancelling ? 'Cancelling...' : 'Cancel booking'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.error,
-                side: BorderSide(color: colors.errorBorder),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+          RatingCard(booking: booking, onSubmitted: widget.onRefresh),
+        ],
+
+        // BOTTOM — Edit / Cancel actions. Kapag pareho silang
+        // applicable (parehong "Awaiting Approval" ang kondisyon),
+        // magkatabi sila sa isang Row; kapag Edit lang o Cancel lang,
+        // buong-lapad na button na lang.
+        if (_canEdit || _isCancellable) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (_canEdit) ...[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openEdit,
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('Edit booking'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      side: BorderSide(color: colors.primary.withValues(alpha: 0.4)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                if (_isCancellable) const SizedBox(width: 10),
+              ],
+              if (_isCancellable)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _cancelling ? null : _confirmAndCancel,
+                    icon: _cancelling
+                        ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: colors.error))
+                        : const Icon(Icons.close_rounded, size: 16),
+                    label: Text(_cancelling ? 'Cancelling...' : 'Cancel booking'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.error,
+                      side: BorderSide(color: colors.errorBorder),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ],

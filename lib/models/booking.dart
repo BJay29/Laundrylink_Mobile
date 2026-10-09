@@ -69,7 +69,7 @@ BookingStatus _statusFromApi(String? raw) {
   }
 }
 
-/// NEW — mirrors the backend's MachineAssignmentResponse (one row per
+/// Mirrors the backend's MachineAssignmentResponse (one row per
 /// load in a multi-machine booking — see BookingMachineAssignment in
 /// app/models.py). `phase` is "washing" | "drying" | "done" and is the
 /// source of truth for whether a given load is currently being washed
@@ -136,6 +136,9 @@ class Booking {
     this.fulfillmentMode,
     this.specialInstructions,
     this.pickupDatetime,
+    this.dropoffDatetime,
+    this.dropoffWindow,
+    this.pickupWindow,
     this.deliveryDatetime,
     this.deliveryFeeCharged,
     this.promoCode,
@@ -149,6 +152,9 @@ class Booking {
     this.paidAt,
     this.proofOfPaymentUrl,
     this.paymentRejectionReason,
+    this.referenceNumber,
+    this.isVerifiedByOcr = false,
+    this.extractedAmount,
     this.estimatedWeight,
     this.estimatedPrice,
     this.finalWeight,
@@ -171,6 +177,9 @@ class Booking {
     this.deliveryRiderContact,
     this.deliveryRiderAssignedAt,
     this.machineAssignments = const [],
+    this.hasRated = false,
+    this.rating,
+    this.ratingComment,
   });
 
   final int? id;
@@ -184,7 +193,23 @@ class Booking {
   final int? loads;
   final String? fulfillmentMode;
   final String? specialInstructions;
+
+  /// Delivery pickup leg (kailan kukunin ng rider ang laundry sa bahay).
   final DateTime? pickupDatetime;
+
+  /// Optional na oras kung kailan balak pumunta ng customer sa shop.
+  /// Para sa "dropoff" bookings lang; null kung hindi nagbigay o kung
+  /// delivery ang booking.
+  final DateTime? dropoffDatetime;
+
+  /// Time window labels: "morning" | "afternoon" | "evening" |
+  /// "anytime" | null. Independiyente sa *_datetime — pwedeng meron
+  /// window nang walang exact time, o pareho, o wala man lang.
+  /// dropoffWindow para sa "dropoff" mode, pickupWindow para sa
+  /// "delivery" mode.
+  final String? dropoffWindow;
+  final String? pickupWindow;
+
   final DateTime? deliveryDatetime;
   final double? deliveryFeeCharged;
   final String? promoCode;
@@ -202,6 +227,19 @@ class Booking {
   final DateTime? paidAt;
   final String? proofOfPaymentUrl;
   final String? paymentRejectionReason;
+
+  /// NEW (Secure Payment Verification System) — ang reference number ng
+  /// online payment na ipinasok ng customer (GCash/Maya/bank transfer).
+  final String? referenceNumber;
+
+  /// NEW — true kapag na-verify na ng OCR pipeline (o na-bypass via
+  /// Sandbox Mode) na ang reference number ay lumalabas sa resibo
+  /// mismo.
+  final bool isVerifiedByOcr;
+
+  /// NEW — amount na na-extract ng OCR mula sa resibo mismo (hindi mula
+  /// sa customer input).
+  final double? extractedAmount;
 
   final double? estimatedWeight;
   final double? estimatedPrice;
@@ -232,23 +270,28 @@ class Booking {
   final String? deliveryRiderContact;
   final DateTime? deliveryRiderAssignedAt;
 
-  /// NEW — per-load machine assignment rows (multi-machine bookings).
+  /// Per-load machine assignment rows (multi-machine bookings).
   /// Empty for legacy single-machine bookings, which instead use
   /// washerNumber/dryerNumber directly.
   final List<BookingMachineAssignment> machineAssignments;
 
-  /// NEW — resolves whether the booking's active machine cycle right
+  /// NEW (Rating after order) — mirrors BookingResponse.has_rated /
+  /// rating / rating_comment sa backend (computed properties sa Booking
+  /// model). `hasRated` ay true kapag nakapag-rate na ang customer sa
+  /// booking na ito; `rating` ay 1-5 (null kung hindi pa); `ratingComment`
+  /// ay ang opsyonal na komento.
+  final bool hasRated;
+  final int? rating;
+  final String? ratingComment;
+
+  /// Resolves whether the booking's active machine cycle right
   /// now is a "washing" or "drying" phase, for the countdown timer's
   /// label. Priority:
   ///   1. Any not-yet-"done" load in machineAssignments (multi-machine
   ///      path) — if ANY load is still "drying", treat the whole
-  ///      booking as "drying" (a later phase supersedes an earlier one
-  ///      for display purposes, since the countdown itself already
-  ///      reflects the single longest-remaining active cycle).
-  ///   2. Legacy single-machine fallback: dryerNumber set and no
-  ///      washerNumber (dry_only) or both set (full_service, assume
-  ///      drying once dryer is present) → "drying"; otherwise
-  ///      "washing".
+  ///      booking as "drying".
+  ///   2. Legacy single-machine fallback: dryerNumber set → "drying";
+  ///      otherwise "washing".
   /// Returns null if status isn't inProgress at all.
   String? get activePhase {
     if (status != BookingStatus.inProgress) return null;
@@ -278,6 +321,11 @@ class Booking {
         pickupDatetime: json['pickup_datetime'] == null
             ? null
             : DateTime.tryParse(json['pickup_datetime'] as String),
+        dropoffDatetime: json['dropoff_datetime'] == null
+            ? null
+            : DateTime.tryParse(json['dropoff_datetime'] as String),
+        dropoffWindow: json['dropoff_window'] as String?,
+        pickupWindow: json['pickup_window'] as String?,
         deliveryDatetime: json['delivery_datetime'] == null
             ? null
             : DateTime.tryParse(json['delivery_datetime'] as String),
@@ -297,6 +345,9 @@ class Booking {
             : DateTime.tryParse(json['paid_at'] as String),
         proofOfPaymentUrl: json['proof_of_payment_url'] as String?,
         paymentRejectionReason: json['payment_rejection_reason'] as String?,
+        referenceNumber: json['reference_number'] as String?,
+        isVerifiedByOcr: json['is_verified_by_ocr'] as bool? ?? false,
+        extractedAmount: (json['extracted_amount'] as num?)?.toDouble(),
         estimatedWeight: (json['estimated_weight'] as num?)?.toDouble(),
         estimatedPrice: (json['estimated_price'] as num?)?.toDouble(),
         finalWeight: (json['final_weight'] as num?)?.toDouble(),
@@ -338,6 +389,9 @@ class Booking {
                 ?.map((e) => BookingMachineAssignment.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        hasRated: json['has_rated'] as bool? ?? false,
+        rating: json['rating'] as int?,
+        ratingComment: json['rating_comment'] as String?,
       );
 }
 

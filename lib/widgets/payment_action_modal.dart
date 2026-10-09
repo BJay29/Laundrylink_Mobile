@@ -10,38 +10,38 @@ import '../services/shop_service.dart';
 import '../services/upload_service.dart';
 import '../theme/app_colors.dart';
 
+/// Allowed file extensions for the uploaded receipt. Document extensions
+/// (.pdf especially) are blocked outright — image_picker's gallery source
+/// already filters to images, but a renamed/misreported file could slip
+/// through on some platforms, so this is re-checked against the picked
+/// file's own name as a second guard.
+const Set<String> _kAllowedReceiptExtensions = {'jpg', 'jpeg', 'png'};
+
+/// Format rule mirrored from the backend's REFERENCE_NUMBER_PATTERN
+/// (schemas.py): 6-20 characters, letters/numbers/dashes only. Kept
+/// deliberately loose since the shop may accept GCash, Maya, or bank
+/// transfer reference numbers — the backend remains the source of truth.
+final RegExp _kReferenceNumberPattern = RegExp(r'^[A-Za-z0-9-]{6,20}$');
+
 /// Opens the payment action bottom sheet for a booking sitting at
 /// "Awaiting Payment" (price already finalized by the shop). Called
 /// from the "Payment" node in OrderTimelineTracker.
 ///
 /// Two branches, decided by `booking.paymentMethod`:
-///   - "online_qr": QR display + save-to-gallery + upload proof +
-///     submit -> receipt/under-review state.
-///   - "cash" / "cod": simple instructions block (no upload needed —
-///     settled in person). Just a "Got it" dismiss.
+///   - "online_qr": QR display + save-to-gallery + reference number +
+///     upload proof + submit -> receipt/under-review state.
+///   - "cash" / "cod": simple instructions block (no upload needed).
 ///
 /// [onUpdated] is called after a successful proof submission so the
-/// caller can trigger a silent refresh (the real status transition
-/// itself arrives via the existing customer WebSocket push once staff
-/// verifies on the web side — this callback just nudges an immediate
-/// re-fetch rather than waiting for the next poll tick).
+/// caller can trigger a silent refresh.
 ///
-/// UPDATED (layout compaction, round 2) — the online-payment branch's
-/// sheet height (initialChildSize/maxChildSize) was previously sized
-/// at 0.9/0.95, left over from before the QR and upload box were
-/// shrunk. That left a large empty gap below the "Submit Payment"
-/// button. Sheet height is now 0.62/0.68 so it hugs the actual content
-/// height instead. QR is 130x130, upload box is 90 tall, and all
-/// spacing/padding/font sizes throughout are compacted so the whole
-/// flow — bill, QR, save button, upload box, and submit button — fits
-/// without needing to scroll to find the button.
+/// UPDATED (Secure Payment Verification System): required reference
+/// number (format-checked), JPEG/PNG-only check, instant submit masking.
 ///
-/// UPDATED (receipt UI polish) — _ReceiptView redesigned: animated
-/// check-circle entrance (scale+fade), a "receipt ticket" card with a
-/// dashed divider separating the summary rows from the reference
-/// details, a status pill, and a "press down" Close button. No logic
-/// changed anywhere in this file — same fields, same calls, same
-/// states.
+/// FIXED (Receipt reference bug): after a successful submit, the
+/// booking returned by submitPaymentProof() is kept (_submittedBooking)
+/// and passed to the receipt view, so the customer's actual reference
+/// number is shown instead of the "#bookingId" fallback.
 Future<void> showPaymentActionModal(
   BuildContext context, {
   required Booking booking,
@@ -65,14 +65,10 @@ class _PaymentActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Sheet height as a fraction of the screen. Cash/COD stays small
-    // (0.42) since it's just a short instructions block. Online
-    // payment is 0.62/0.68 so the sheet hugs the actual content
-    // instead of leaving a big empty gap below the Submit button.
     return DraggableScrollableSheet(
-      initialChildSize: _isCashLike ? 0.42 : 0.62,
+      initialChildSize: _isCashLike ? 0.42 : 0.68,
       minChildSize: 0.3,
-      maxChildSize: 0.68,
+      maxChildSize: 0.74,
       expand: false,
       builder: (context, scrollController) {
         final colors = context.colors;
@@ -194,7 +190,8 @@ class _CashInstructions extends StatelessWidget {
 }
 
 /// Online QR branch — full flow: bill breakdown, QR (fetched from the
-/// shop), save-to-gallery, upload proof, submit -> receipt/under-review.
+/// shop), save-to-gallery, reference number + upload proof, submit ->
+/// receipt/under-review.
 class _OnlinePaymentFlow extends StatefulWidget {
   const _OnlinePaymentFlow({
     required this.booking,
@@ -214,22 +211,28 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
   final BookingService _bookingService = BookingService();
   final UploadService _uploadService = UploadService();
   final ImagePicker _imagePicker = ImagePicker();
+  final _referenceController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
   Shop? _shop;
   bool _loadingShop = true;
 
-  /// FIXED (Flutter Web support): dating `File? _selectedProofImage`
-  /// (dart:io) — ipinapakita gamit ang `Image.file`, na hindi
-  /// suportado sa Flutter Web ("Image.file is not supported on
-  /// Flutter Web" sa error log). Ngayon, `XFile` (cross-platform, mula
-  /// mismo sa image_picker) ang tinatago, kasabay ng cached na bytes
-  /// (`_selectedProofBytes`) para sa preview gamit ang `Image.memory`
-  /// — gumagana ito pareho sa web at mobile.
+  /// XFile (cross-platform) + cached bytes for the Image.memory preview —
+  /// works on both Flutter Web and mobile.
   XFile? _selectedProofImage;
   Uint8List? _selectedProofBytes;
 
+  /// Client-side file-type error, shown right after picking a file.
+  String? _fileTypeError;
+
   bool _submitting = false;
   bool _submitted = false;
+
+  /// NEW — the booking returned by the backend after a successful
+  /// submit. Contains the saved reference_number / is_verified_by_ocr,
+  /// which the stale widget.booking doesn't have yet.
+  Booking? _submittedBooking;
+
   String? _errorMessage;
 
   bool get _alreadyPendingVerification => widget.booking.paymentStatus == 'pending_verification';
@@ -238,6 +241,12 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
   void initState() {
     super.initState();
     _loadShop();
+  }
+
+  @override
+  void dispose() {
+    _referenceController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadShop() async {
@@ -259,20 +268,31 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
     }
   }
 
+  /// Returns the lowercase extension of [name] (no dot), or '' if none.
+  String _extensionOf(String name) {
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex == -1 || dotIndex == name.length - 1) return '';
+    return name.substring(dotIndex + 1).toLowerCase();
+  }
+
   Future<void> _pickImage() async {
     final image = await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (image == null) return;
 
-    // Read bytes once, up front — needed for the Image.memory preview
-    // regardless of platform, and reused later for the actual upload
-    // (UploadService.uploadPaymentProof also reads via image.readAsBytes(),
-    // but reading it here too just for the preview is fine — image_picker
-    // keeps the underlying blob/file available for repeat reads).
+    final extension = _extensionOf(image.name);
+    if (!_kAllowedReceiptExtensions.contains(extension)) {
+      setState(() {
+        _fileTypeError = 'Only JPEG or PNG screenshots are allowed. Please pick a different file.';
+      });
+      return;
+    }
+
     final bytes = await image.readAsBytes();
     if (!mounted) return;
     setState(() {
       _selectedProofImage = image;
       _selectedProofBytes = bytes;
+      _fileTypeError = null;
       _errorMessage = null;
     });
   }
@@ -292,167 +312,237 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
     }
   }
 
+  /// `_submitting = true` is set via setState() before any `await`, so
+  /// a rapid second tap can't fire a duplicate request.
   Future<void> _submit() async {
     final bookingId = widget.booking.id;
     final image = _selectedProofImage;
     if (bookingId == null || image == null) return;
+    if (_submitting) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() {
       _submitting = true;
       _errorMessage = null;
     });
 
+    final referenceNumber = _referenceController.text.trim().toUpperCase();
+
     try {
       final proofUrl = await _uploadService.uploadPaymentProof(imageFile: image, bookingId: bookingId);
-      await _bookingService.submitPaymentProof(bookingId: bookingId, proofOfPaymentUrl: proofUrl);
+      final updated = await _bookingService.submitPaymentProof(
+        bookingId: bookingId,
+        proofOfPaymentUrl: proofUrl,
+        referenceNumber: referenceNumber,
+      );
 
       if (!mounted) return;
       setState(() {
+        _submittedBooking = updated;
         _submitted = true;
         _submitting = false;
       });
       widget.onUpdated();
-    } catch (_) {
+    } on Object catch (e) {
       if (!mounted) return;
+      // ApiException carries a human-readable `.message` from the
+      // backend (duplicate reference, OCR "Fraud Alert", etc.).
+      final message = _messageFrom(e) ?? 'Could not submit your payment proof. Please try again.';
       setState(() {
         _submitting = false;
-        _errorMessage = 'Could not submit your payment proof. Please try again.';
+        _errorMessage = message;
       });
     }
+  }
+
+  String? _messageFrom(Object error) {
+    try {
+      final dynamic dyn = error;
+      final message = dyn.message;
+      if (message is String && message.trim().isNotEmpty) return message;
+    } catch (_) {
+      // Not an object with a `.message` getter — fall through to null.
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
     if (_submitted || _alreadyPendingVerification) {
-      return _ReceiptView(booking: widget.booking, scrollController: widget.scrollController);
+      return _ReceiptView(
+        booking: _submittedBooking ?? widget.booking,
+        scrollController: widget.scrollController,
+      );
     }
 
     final colors = context.colors;
     final b = widget.booking;
+    final canSubmit = _selectedProofImage != null && !_submitting;
 
-    return ListView(
-      controller: widget.scrollController,
-      padding: const EdgeInsets.fromLTRB(22, 14, 22, 18),
-      children: [
-        Row(
-          children: [
-            Icon(Icons.qr_code_2_rounded, color: colors.primary, size: 20),
-            const SizedBox(width: 8),
-            Text('Complete Your Payment', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: colors.textPrimary)),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        // Bill breakdown — compacted padding/spacing.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(14)),
-          child: Column(
+    return Form(
+      key: _formKey,
+      child: ListView(
+        controller: widget.scrollController,
+        padding: const EdgeInsets.fromLTRB(22, 14, 22, 18),
+        children: [
+          Row(
             children: [
-              _billRow(colors, 'Weighed', b.finalWeight != null ? '${b.finalWeight} kg' : '—'),
-              const SizedBox(height: 4),
-              _billRow(colors, 'Amount due', b.finalPrice != null ? '₱${b.finalPrice!.toStringAsFixed(2)}' : '—', emphasize: true),
+              Icon(Icons.qr_code_2_rounded, color: colors.primary, size: 20),
+              const SizedBox(width: 8),
+              Text('Complete Your Payment', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: colors.textPrimary)),
             ],
           ),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-        // QR section — shrunk from 200x200 to 130x130, tighter labels.
-        Text('Scan to pay', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: colors.textSecondary)),
-        const SizedBox(height: 6),
-        if (_loadingShop)
-          const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 14), child: CircularProgressIndicator()))
-        else if (_shop?.qrCodeUrl == null)
+          // Bill breakdown
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: colors.warningBg, borderRadius: BorderRadius.circular(12)),
-            child: Text(
-              "This shop hasn't set up their QR code yet. Please contact them directly to settle payment.",
-              style: TextStyle(fontSize: 12, color: colors.warning),
-            ),
-          )
-        else ...[
-          Center(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              // Image.network is fine on both web and mobile — this
-              // one was never the problem, only the local proof
-              // preview below (Image.file) was.
-              child: Image.network(_shop!.qrCodeUrl!, width: 130, height: 130, fit: BoxFit.contain),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              children: [
+                _billRow(colors, 'Weighed', b.finalWeight != null ? '${b.finalWeight} kg' : '—'),
+                const SizedBox(height: 4),
+                _billRow(colors, 'Amount due', b.finalPrice != null ? '₱${b.finalPrice!.toStringAsFixed(2)}' : '—', emphasize: true),
+              ],
             ),
           ),
-          const SizedBox(height: 2),
-          Center(
-            child: TextButton.icon(
-              onPressed: () => _saveQrToGallery(_shop!.qrCodeUrl!),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                minimumSize: const Size(0, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: const Icon(Icons.download_rounded, size: 16),
-              label: const Text('Save QR to Gallery', style: TextStyle(fontSize: 12.5)),
-            ),
-          ),
-        ],
+          const SizedBox(height: 12),
 
-        const SizedBox(height: 12),
-        Text('Upload proof of payment', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: colors.textSecondary)),
-        const SizedBox(height: 6),
-        InkWell(
-          onTap: _submitting ? null : _pickImage,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            width: double.infinity,
-            // Shrunk from 150 to 90 — was the single biggest reason the
-            // Submit button needed a scroll to reach.
-            height: 90,
-            decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _selectedProofBytes == null ? colors.border : colors.primary),
+          // QR section
+          Text('Scan to pay', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: colors.textSecondary)),
+          const SizedBox(height: 6),
+          if (_loadingShop)
+            const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 14), child: CircularProgressIndicator()))
+          else if (_shop?.qrCodeUrl == null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: colors.warningBg, borderRadius: BorderRadius.circular(12)),
+              child: Text(
+                "This shop hasn't set up their QR code yet. Please contact them directly to settle payment.",
+                style: TextStyle(fontSize: 12, color: colors.warning),
+              ),
+            )
+          else ...[
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(_shop!.qrCodeUrl!, width: 130, height: 130, fit: BoxFit.contain),
+              ),
             ),
-            child: _selectedProofBytes == null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_photo_alternate_outlined, size: 22, color: colors.primary),
-                        const SizedBox(height: 5),
-                        Text('Tap to attach a screenshot', style: TextStyle(fontSize: 11.5, color: colors.textSecondary)),
-                      ],
+            const SizedBox(height: 2),
+            Center(
+              child: TextButton.icon(
+                onPressed: () => _saveQrToGallery(_shop!.qrCodeUrl!),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: const Icon(Icons.download_rounded, size: 16),
+                label: const Text('Save QR to Gallery', style: TextStyle(fontSize: 12.5)),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+          // Reference number field — required, format-checked.
+          Text('Reference number', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: colors.textSecondary)),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: _referenceController,
+            enabled: !_submitting,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              hintText: 'e.g. 1234567890123',
+              hintStyle: TextStyle(color: colors.textMuted, fontSize: 13),
+              filled: true,
+              fillColor: colors.surface,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: colors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: colors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: colors.primary, width: 1.5)),
+              errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: colors.error)),
+            ),
+            validator: (value) {
+              final cleaned = (value ?? '').trim();
+              if (cleaned.isEmpty) return 'Please enter the reference number from your receipt.';
+              if (!_kReferenceNumberPattern.hasMatch(cleaned)) {
+                return 'Enter 6–20 letters/numbers from your receipt (no spaces).';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Find this on your GCash/Maya/bank receipt — usually labeled "Ref No." or "Transaction ID".',
+            style: TextStyle(fontSize: 10.5, color: colors.textMuted, height: 1.3),
+          ),
+
+          const SizedBox(height: 14),
+          Text('Upload proof of payment', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: colors.textSecondary)),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: _submitting ? null : _pickImage,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              width: double.infinity,
+              height: 90,
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _selectedProofBytes == null ? colors.border : colors.primary),
+              ),
+              child: _selectedProofBytes == null
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add_photo_alternate_outlined, size: 22, color: colors.primary),
+                          const SizedBox(height: 5),
+                          Text('Tap to attach a screenshot (JPEG/PNG only)', style: TextStyle(fontSize: 11.5, color: colors.textSecondary)),
+                        ],
+                      ),
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.memory(_selectedProofBytes!, fit: BoxFit.cover, width: double.infinity, height: 90),
                     ),
-                  )
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    // FIXED: Image.memory instead of Image.file — works
-                    // on Flutter Web (no real filesystem there) as well
-                    // as mobile.
-                    child: Image.memory(_selectedProofBytes!, fit: BoxFit.cover, width: double.infinity, height: 90),
-                  ),
-          ),
-        ),
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 8),
-          Text(_errorMessage!, style: TextStyle(fontSize: 11.5, color: colors.error)),
-        ],
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: (_selectedProofImage == null || _submitting) ? null : _submit,
-            style: FilledButton.styleFrom(
-              backgroundColor: colors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            child: _submitting
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Submit Payment', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
-        ),
-      ],
+          if (_fileTypeError != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 14, color: colors.error),
+                const SizedBox(width: 6),
+                Expanded(child: Text(_fileTypeError!, style: TextStyle(fontSize: 11.5, color: colors.error))),
+              ],
+            ),
+          ],
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(_errorMessage!, style: TextStyle(fontSize: 11.5, color: colors.error)),
+          ],
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: canSubmit ? _submit : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: _submitting
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Submit Payment', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -476,17 +566,11 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
 
 /// Receipt / "Under Review" state — shown right after a successful
 /// submit, and again on reopen while payment_status is still
-/// "pending_verification" (so navigating away and back shows the same
-/// state instead of the upload form again).
+/// "pending_verification".
 ///
-/// UPDATED (UI polish) — redesigned as a "receipt ticket" card: an
-/// animated check-circle (scale+fade entrance, subtle glow) up top, a
-/// status pill under the title, a summary block (Amount + Method)
-/// separated by a dashed "tear line" from a Reference-code block
-/// below it (classic printed-receipt look), and a "press down" tap
-/// scale on the Close button. Same fields/data as before — booking.id,
-/// finalPrice, paymentMethod, paymentRejectionReason — nothing new is
-/// read from the model.
+/// The Reference block shows the customer's actual submitted
+/// reference_number (falling back to the booking id only if it isn't
+/// set), plus an "OCR verified" badge once booking.isVerifiedByOcr.
 class _ReceiptView extends StatefulWidget {
   const _ReceiptView({required this.booking, required this.scrollController});
 
@@ -538,13 +622,14 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
     final colors = context.colors;
     final booking = widget.booking;
     final checkCurve = CurvedAnimation(parent: _entrance, curve: const Interval(0.0, 0.55, curve: Curves.elasticOut));
+    final referenceLabel = (booking.referenceNumber?.trim().isNotEmpty ?? false)
+        ? booking.referenceNumber!
+        : '#${booking.id ?? '—'}';
 
     return ListView(
       controller: widget.scrollController,
       padding: const EdgeInsets.fromLTRB(24, 22, 24, 22),
       children: [
-        // Animated check-circle — scale in with a soft elastic pop,
-        // plus a subtle glow ring behind it.
         Center(
           child: AnimatedBuilder(
             animation: checkCurve,
@@ -559,12 +644,12 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
-                  colors: [colors.warning.withOpacity(0.22), colors.warning.withOpacity(0.08)],
+                  colors: [colors.warning.withValues(alpha: 0.22), colors.warning.withValues(alpha: 0.08)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
-                  BoxShadow(color: colors.warning.withOpacity(0.18), blurRadius: 24, spreadRadius: 2),
+                  BoxShadow(color: colors.warning.withValues(alpha: 0.18), blurRadius: 24, spreadRadius: 2),
                 ],
               ),
               child: Container(
@@ -588,7 +673,6 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
           ),
         ),
         const SizedBox(height: 8),
-        // Status pill — quick-glance state, sits right under the title.
         _staggered(
           start: 0.4,
           end: 0.8,
@@ -598,7 +682,7 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
               decoration: BoxDecoration(
                 color: colors.warningBg,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: colors.warning.withOpacity(0.35)),
+                border: Border.all(color: colors.warning.withValues(alpha: 0.35)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -630,8 +714,7 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
         ),
         const SizedBox(height: 20),
 
-        // "Receipt ticket" card — summary up top, dashed tear line,
-        // reference code below. Classic printed-receipt silhouette.
+        // "Receipt ticket" card
         _staggered(
           start: 0.5,
           end: 0.9,
@@ -639,7 +722,7 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
             decoration: BoxDecoration(
               color: colors.chipBg,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: colors.border.withOpacity(0.6)),
+              border: Border.all(color: colors.border.withValues(alpha: 0.6)),
             ),
             child: Column(
               children: [
@@ -677,8 +760,6 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
                     ],
                   ),
                 ),
-                // Dashed "tear line" between the summary and the
-                // reference code, like a physical receipt.
                 CustomPaint(
                   size: const Size(double.infinity, 1),
                   painter: _DashedLinePainter(color: colors.border),
@@ -695,9 +776,23 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
                           Text('Reference', style: TextStyle(fontSize: 12, color: colors.textSecondary)),
                         ],
                       ),
-                      Text(
-                        '#${booking.id ?? '—'}',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colors.textPrimary, letterSpacing: 0.4),
+                      Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                referenceLabel,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colors.textPrimary, letterSpacing: 0.4),
+                              ),
+                            ),
+                            if (booking.isVerifiedByOcr) ...[
+                              const SizedBox(width: 6),
+                              Icon(Icons.verified_rounded, size: 14, color: colors.success),
+                            ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -769,8 +864,7 @@ class _ReceiptViewState extends State<_ReceiptView> with SingleTickerProviderSta
   }
 }
 
-/// Paints a horizontal dashed line — used as the "tear line" in the
-/// receipt ticket card.
+/// Paints a horizontal dashed line — the "tear line" in the receipt card.
 class _DashedLinePainter extends CustomPainter {
   const _DashedLinePainter({required this.color});
   final Color color;
@@ -793,9 +887,8 @@ class _DashedLinePainter extends CustomPainter {
   bool shouldRepaint(covariant _DashedLinePainter oldDelegate) => oldDelegate.color != color;
 }
 
-/// "Press down" tap scale — Listener-based (raw pointer, no tap-gesture
-/// recognizer) so it never conflicts with the real onPressed on the
-/// button underneath, same fix used across the auth pages.
+/// "Press down" tap scale — Listener-based so it never conflicts with
+/// the real onPressed on the button underneath.
 class _TapScale extends StatefulWidget {
   const _TapScale({required this.child, required this.onTap});
   final Widget child;

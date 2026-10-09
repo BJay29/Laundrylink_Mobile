@@ -7,12 +7,19 @@ import '../services/address_service.dart';
 import '../services/api_service.dart';
 import '../services/booking_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/time_window_selector.dart';
 import 'booking_confirmation_page.dart';
 import 'saved_addresses_page.dart';
 
 /// Dedicated booking form page — opened after tapping "Book" on a
 /// service in ShopDetailPage. Collects everything CustomerBookingCreate
 /// needs (see app/schemas.py) and submits to POST /bookings/customer.
+///
+/// UPDATED (Flexible Booking feature): dinagdagan ng OPTIONAL na time
+/// window chips (Morning/Afternoon/Evening/Anytime) sa ilalim ng
+/// exact-time field, pareho para sa preferred drop-off at delivery
+/// pickup. Independiyente ito sa exact date/time — pwedeng meron
+/// window nang walang exact time, o pareho, o wala man lang.
 class BookingFormPage extends StatefulWidget {
   const BookingFormPage({super.key, required this.shop, required this.service});
 
@@ -34,6 +41,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   String _fulfillmentMode = 'dropoff'; // 'dropoff' | 'delivery'
   DateTime? _pickupDatetime;
+
+  /// Optional preferred drop-off time (dropoff mode lang).
+  DateTime? _dropoffDatetime;
+
+  /// NEW (Flexible Booking feature) — optional time window labels,
+  /// independiyente sa exact *_datetime sa itaas.
+  String? _dropoffWindow;
+  String? _pickupWindow;
+
   final Set<int> _selectedAddOnIds = {};
 
   List<Address>? _addresses;
@@ -46,31 +62,19 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool _submitting = false;
   String? _errorMessage;
 
-  // --- NEW (Real-time Promo Preview feature) ---
-  /// Result of the last successful/attempted preview call, or null if
-  /// no code has been checked yet. Drives the live discount row in
-  /// _PriceSummary.
+  /// Result of the last successful/attempted promo preview call, or
+  /// null if no code has been checked yet. Drives the live discount row
+  /// in _PriceSummary.
   Map<String, dynamic>? _promoPreview;
   bool _checkingPromo = false;
   Timer? _promoDebounce;
 
-  /// FIXED (Online Payment toggle bug — Booking & Order Tracking Flow
-  /// Fix): dating `qrCodeUrl != null` LANG ang tinitingnan dito —
-  /// kaya kahit naka-ON na ang "Online Payment" toggle sa Optimization
-  /// Settings (Shop.accepts_online), permanenteng naka-disable pa rin
-  /// ang option kung walang na-upload pang QR image, at WALANG paraan
-  /// para malaman ng app kung talagang gusto ng shop na tanggapin ito
-  /// kung meron namang QR pero naka-OFF ang toggle.
-  ///
-  /// Ngayon, PAREHONG kailangan: naka-ON ang toggle AT meron nang
-  /// na-upload na QR — kailangan talaga ang dalawa bago maging
-  /// magagamit ang option.
+  /// Kailangan PAREHO: naka-ON ang "Online Payment" toggle ng shop
+  /// (Shop.acceptsOnline) AT may na-upload nang QR.
   bool get _onlinePaymentAvailable => widget.shop.acceptsOnline && widget.shop.qrCodeUrl != null;
 
-  /// NEW — magkaibang paliwanag depende kung ALIN sa dalawang
-  /// kondisyon ang kulang, para malinaw sa customer (at sa staff, kung
-  /// sila mismo ang nagtatanong) kung ano pa ang dapat ayusin sa shop
-  /// side sa halip na isang generic na mensahe lang.
+  /// Magkaibang paliwanag depende kung ALIN sa dalawang kondisyon ang
+  /// kulang.
   String? get _onlinePaymentUnavailableReason {
     if (_onlinePaymentAvailable) return null;
     if (!widget.shop.acceptsOnline) {
@@ -115,8 +119,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   double get _estimatedSubtotal => (widget.service.price * _quantity) + _addOnsTotal + _deliveryFee;
 
-  /// NEW (Real-time Promo Preview) — discount amount from the last
-  /// successful preview, 0 if none checked / invalid / cleared.
+  /// Discount amount from the last successful preview, 0 if none
+  /// checked / invalid / cleared.
   double get _previewDiscount {
     if (_promoPreview == null || _promoPreview!['valid'] != true) return 0.0;
     return (_promoPreview!['discount_amount'] as num?)?.toDouble() ?? 0.0;
@@ -132,20 +136,16 @@ class _BookingFormPageState extends State<BookingFormPage> {
     }
   }
 
-  /// NEW (Real-time Promo Preview feature) — quantity/add-ons/delivery
-  /// changes shift the subtotal, which the discount amount (for a
-  /// percent-based code) depends on — so re-check whenever they change
-  /// and a code is already present, same debounce as typing the code.
+  /// Quantity/add-ons/delivery changes shift the subtotal, which the
+  /// discount amount (for a percent-based code) depends on — so
+  /// re-check whenever they change and a code is already present.
   void _scheduleQuantityRecheck() {
     if (_promoController.text.trim().isNotEmpty) {
       _schedulePromoCheck();
     }
   }
 
-  /// NEW (Real-time Promo Preview feature) — debounced call to
-  /// POST /bookings/promo-preview, exactly the flow the backend was
-  /// already built for (see PromoPreviewRequest/preview_promo_code()
-  /// docstrings) but never wired up on this page until now.
+  /// Debounced call to POST /bookings/promo-preview.
   void _schedulePromoCheck() {
     _promoDebounce?.cancel();
 
@@ -229,7 +229,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
     await _ensureAddressesLoaded();
   }
 
-  Future<void> _pickPickupDateTime() async {
+  /// Shared date → time picker, ginagamit ng pickup (delivery) at
+  /// drop-off (optional). Nagbabalik ng null kung na-cancel.
+  Future<DateTime?> _pickDateTime() async {
     final now = DateTime.now();
     final date = await showDatePicker(
       context: context,
@@ -237,17 +239,27 @@ class _BookingFormPageState extends State<BookingFormPage> {
       firstDate: now,
       lastDate: now.add(const Duration(days: 30)),
     );
-    if (date == null || !mounted) return;
+    if (date == null || !mounted) return null;
 
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
     );
-    if (time == null) return;
+    if (time == null) return null;
 
-    setState(() {
-      _pickupDatetime = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    });
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _pickPickupDateTime() async {
+    final picked = await _pickDateTime();
+    if (picked == null || !mounted) return;
+    setState(() => _pickupDatetime = picked);
+  }
+
+  Future<void> _pickDropoffDateTime() async {
+    final picked = await _pickDateTime();
+    if (picked == null || !mounted) return;
+    setState(() => _dropoffDatetime = picked);
   }
 
   Future<void> _submit() async {
@@ -265,6 +277,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
       return;
     }
 
+    // Optional field, pero kung nilagyan, dapat hindi lumipas ang oras.
+    if (_fulfillmentMode == 'dropoff' &&
+        _dropoffDatetime != null &&
+        _dropoffDatetime!.isBefore(DateTime.now())) {
+      setState(() => _errorMessage = 'Your preferred drop-off time has already passed. Please pick a later time.');
+      return;
+    }
+
     setState(() => _submitting = true);
 
     try {
@@ -275,7 +295,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
         quantity: _quantity,
         specialInstructions: _instructionsController.text,
         fulfillmentMode: _fulfillmentMode,
-        pickupDatetime: _pickupDatetime,
+        pickupDatetime: _fulfillmentMode == 'delivery' ? _pickupDatetime : null,
+        dropoffDatetime: _fulfillmentMode == 'dropoff' ? _dropoffDatetime : null,
+        dropoffWindow: _fulfillmentMode == 'dropoff' ? _dropoffWindow : null,
+        pickupWindow: _fulfillmentMode == 'delivery' ? _pickupWindow : null,
         addressId: _fulfillmentMode == 'delivery' ? _selectedAddressId : null,
         addOnIds: _selectedAddOnIds.toList(),
         promoCode: _promoController.text,
@@ -357,6 +380,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                     onTap: () => setState(() {
                       _fulfillmentMode = 'dropoff';
                       _pickupDatetime = null;
+                      _pickupWindow = null;
                       _syncPaymentMethodForFulfillment();
                     }),
                   ),
@@ -372,6 +396,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
                         ? () {
                             setState(() {
                               _fulfillmentMode = 'delivery';
+                              // Drop-off time/window ay para sa
+                              // drop-off lang.
+                              _dropoffDatetime = null;
+                              _dropoffWindow = null;
                               _syncPaymentMethodForFulfillment();
                             });
                             _ensureAddressesLoaded();
@@ -389,46 +417,44 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
             ],
 
+            // --- Preferred drop-off (optional, dropoff mode lang) ---
+            if (_fulfillmentMode == 'dropoff') ...[
+              const SizedBox(height: 18),
+              const _FieldLabel('Preferred drop-off date & time (optional)'),
+              _DateTimeField(
+                value: _dropoffDatetime == null ? null : _formatDateTime(_dropoffDatetime!),
+                placeholder: 'Select when you plan to drop off',
+                icon: Icons.schedule_rounded,
+                onTap: _pickDropoffDateTime,
+                onClear: _dropoffDatetime == null ? null : () => setState(() => _dropoffDatetime = null),
+              ),
+              const SizedBox(height: 10),
+              const _FieldLabel('Preferred time window (optional)'),
+              TimeWindowSelector(
+                selected: _dropoffWindow,
+                onChanged: (v) => setState(() => _dropoffWindow = v),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Just a heads-up for the shop — you can still drop off any time they\'re open.',
+                style: TextStyle(fontSize: 11.5, color: colors.textMuted),
+              ),
+            ],
+
             if (_fulfillmentMode == 'delivery') ...[
               const SizedBox(height: 18),
               const _FieldLabel('Pickup date & time'),
-              InkWell(
+              _DateTimeField(
+                value: _pickupDatetime == null ? null : _formatDateTime(_pickupDatetime!),
+                placeholder: 'Select pickup date & time',
+                icon: Icons.event_outlined,
                 onTap: _pickPickupDateTime,
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: colors.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: colors.border),
-                    boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 10, offset: const Offset(0, 4))],
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
-                        child: Icon(Icons.event_outlined, size: 16, color: colors.primary),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        _pickupDatetime == null
-                            ? 'Select pickup date & time'
-                            : _formatDateTime(_pickupDatetime!),
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          color: _pickupDatetime == null ? colors.textMuted : colors.textPrimary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(Icons.chevron_right_rounded, color: colors.textMuted),
-                    ],
-                  ),
-                ),
+              ),
+              const SizedBox(height: 10),
+              const _FieldLabel('Preferred time window (optional)'),
+              TimeWindowSelector(
+                selected: _pickupWindow,
+                onChanged: (v) => setState(() => _pickupWindow = v),
               ),
               if (widget.shop.deliveryFee > 0) ...[
                 const SizedBox(height: 6),
@@ -481,43 +507,32 @@ class _BookingFormPageState extends State<BookingFormPage> {
               decoration: _inputDecoration(context, hint: 'e.g. Please use fragrance-free detergent'),
             ),
 
-            // --- Payment Method selector ---
-            // "Online Payment" is always rendered — never hidden.
-            // Disabled (with an explanation) when either the shop's
-            // toggle is off OR no QR has been uploaded — see
-            // _onlinePaymentAvailable / _onlinePaymentUnavailableReason
-            // above. Selection only — no payment happens on this page
-            // (settled later once the shop confirms the final weight).
+            // --- Payment Method selector (list-style redesign) ---
             const SizedBox(height: 22),
             const _FieldLabel('Payment Method'),
             _PaymentMethodSelector(
               selected: _paymentMethod,
               fulfillmentMode: _fulfillmentMode,
               onlineAvailable: _onlinePaymentAvailable,
+              onlineUnavailableReason: _onlinePaymentUnavailableReason,
               onChanged: (value) => setState(() => _paymentMethod = value),
             ),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'You\'re only choosing a method now — you\'ll settle payment once the shop confirms the final weight, from your Bookings page.',
-                style: TextStyle(fontSize: 11.5, color: colors.textMuted),
-              ),
-            ),
-            if (_onlinePaymentUnavailableReason != null) ...[
-              const SizedBox(height: 6),
-              Row(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(Icons.info_outline_rounded, size: 13, color: colors.textMuted),
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
-                      _onlinePaymentUnavailableReason!,
-                      style: TextStyle(fontSize: 11.5, color: colors.textMuted),
+                      'You\'re only choosing a method now — you\'ll settle payment once the shop confirms the final weight, from your Bookings page.',
+                      style: TextStyle(fontSize: 11.5, color: colors.textMuted, height: 1.4),
                     ),
                   ),
                 ],
               ),
-            ],
+            ),
 
             const SizedBox(height: 22),
             const _FieldLabel('Promo code (optional)'),
@@ -536,9 +551,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
               onChanged: (_) => _schedulePromoCheck(),
             ),
-            // NEW (Real-time Promo Preview feature) — inline hint under
-            // the field: green confirmation once valid, calm (not
-            // scary) message when invalid, nothing while blank/typing.
+            // Inline hint under the field: green confirmation once
+            // valid, calm message when invalid, nothing while blank.
             if (!_checkingPromo && _promoPreview != null) ...[
               const SizedBox(height: 6),
               if (_promoPreview!['valid'] == true)
@@ -663,6 +677,81 @@ class _BookingFormPageState extends State<BookingFormPage> {
     final period = dt.hour >= 12 ? 'PM' : 'AM';
     final minute = dt.minute.toString().padLeft(2, '0');
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour12:$minute $period';
+  }
+}
+
+/// Reusable tappable date/time row, ginagamit ng pickup (delivery) at
+/// preferred drop-off. May optional [onClear] na nagpapakita ng X
+/// button kapag may napili na.
+class _DateTimeField extends StatelessWidget {
+  const _DateTimeField({
+    required this.value,
+    required this.placeholder,
+    required this.icon,
+    required this.onTap,
+    this.onClear,
+  });
+
+  final String? value;
+  final String placeholder;
+  final IconData icon;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final hasValue = value != null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: hasValue ? colors.primary : colors.border),
+          boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: colors.chipBg, shape: BoxShape.circle),
+              child: Icon(icon, size: 16, color: colors.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                value ?? placeholder,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: hasValue ? colors.textPrimary : colors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (hasValue && onClear != null)
+              InkWell(
+                onTap: onClear,
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.close_rounded, size: 18, color: colors.textMuted),
+                ),
+              )
+            else
+              Icon(Icons.chevron_right_rounded, color: colors.textMuted),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -849,67 +938,88 @@ class _AddressTile extends StatelessWidget {
   }
 }
 
-/// "Online Payment" is always rendered — when unavailable it's simply
-/// disabled (greyed out, no onTap), so the customer always sees the
-/// full set of methods the shop could support instead of the list
-/// silently shrinking.
+/// Vertical list ng payment rows: colored icon badge sa kaliwa,
+/// method name + subtitle sa gitna, radio indicator (o "Unavailable"
+/// pill) sa kanan.
 class _PaymentMethodSelector extends StatelessWidget {
   const _PaymentMethodSelector({
     required this.selected,
     required this.fulfillmentMode,
     required this.onlineAvailable,
+    required this.onlineUnavailableReason,
     required this.onChanged,
   });
 
   final String selected;
   final String fulfillmentMode;
   final bool onlineAvailable;
+  final String? onlineUnavailableReason;
   final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     final isDelivery = fulfillmentMode == 'delivery';
     final cashLikeValue = isDelivery ? 'cod' : 'cash';
-    final cashLikeLabel = isDelivery ? 'Cash on Delivery (COD)' : 'Cash on Counter';
-    final cashLikeIcon = isDelivery ? Icons.local_shipping_outlined : Icons.payments_outlined;
+    final cashLikeLabel = isDelivery ? 'Cash on Delivery' : 'Cash on Counter';
+    final cashLikeSubtitle = isDelivery ? 'Pay the rider when your order arrives' : 'Pay in person when you drop off/pick up';
+    final cashLikeIcon = isDelivery ? Icons.local_shipping_rounded : Icons.payments_rounded;
 
-    return Row(
-      children: [
-        Expanded(
-          child: _PaymentOptionTile(
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border),
+        boxShadow: [BoxShadow(color: colors.shadow, blurRadius: 12, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        children: [
+          _PaymentRow(
             label: cashLikeLabel,
+            subtitle: cashLikeSubtitle,
             icon: cashLikeIcon,
+            iconColor: colors.success,
+            iconBg: colors.successBg,
             selected: selected == cashLikeValue,
             enabled: true,
             onTap: () => onChanged(cashLikeValue),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _PaymentOptionTile(
-            label: 'Online Payment (QR Ph)',
+          Divider(height: 1, thickness: 1, color: colors.border, indent: 16, endIndent: 16),
+          _PaymentRow(
+            label: 'Online Payment',
+            subtitle: onlineAvailable ? 'Pay securely via QR (GCash, Maya, banks)' : (onlineUnavailableReason ?? 'Not available for this shop'),
             icon: Icons.qr_code_2_rounded,
+            iconColor: colors.primary,
+            iconBg: colors.chipBg,
             selected: selected == 'online_qr',
             enabled: onlineAvailable,
             onTap: onlineAvailable ? () => onChanged('online_qr') : null,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-class _PaymentOptionTile extends StatelessWidget {
-  const _PaymentOptionTile({
+/// A single row inside the payment method list — icon badge, label +
+/// subtitle, and a trailing radio/status indicator.
+class _PaymentRow extends StatelessWidget {
+  const _PaymentRow({
     required this.label,
+    required this.subtitle,
     required this.icon,
+    required this.iconColor,
+    required this.iconBg,
     required this.selected,
     required this.enabled,
     required this.onTap,
   });
 
   final String label;
+  final String subtitle;
   final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
   final bool selected;
   final bool enabled;
   final VoidCallback? onTap;
@@ -918,42 +1028,79 @@ class _PaymentOptionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final bool isActive = selected && enabled;
-    final Color activeColor = !enabled ? colors.textMuted : (isActive ? colors.primary : colors.textSecondary);
 
     return Opacity(
-      opacity: enabled ? 1.0 : 0.55,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
-          decoration: BoxDecoration(
-            color: isActive ? colors.chipBg : colors.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isActive ? colors.primary : colors.border, width: isActive ? 1.5 : 1),
-            boxShadow: isActive
-                ? [BoxShadow(color: colors.primary.withOpacity(0.16), blurRadius: 12, offset: const Offset(0, 4))]
-                : null,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 22, color: activeColor),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: activeColor),
-              ),
-              if (!enabled) ...[
-                const SizedBox(height: 3),
-                Text(
-                  'Not available',
-                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: colors.textMuted),
+      opacity: enabled ? 1.0 : 0.5,
+      child: Material(
+        color: isActive ? colors.chipBg.withOpacity(0.55) : Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: enabled ? iconBg : colors.neutralBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 20, color: enabled ? iconColor : colors.textMuted),
                 ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: enabled ? colors.textPrimary : colors.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, color: colors.textSecondary, height: 1.3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (!enabled)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: colors.neutralBg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Unavailable',
+                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: colors.neutral),
+                    ),
+                  )
+                else
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isActive ? colors.primary : Colors.transparent,
+                      border: Border.all(color: isActive ? colors.primary : colors.border, width: 1.6),
+                    ),
+                    child: isActive
+                        ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
+                        : null,
+                  ),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -1104,9 +1251,8 @@ class _AddOnCheckboxTile extends StatelessWidget {
   }
 }
 
-/// UPDATED (Real-time Promo Preview feature) — now shows a live
-/// discount row and a recalculated total the moment a valid promo code
-/// is confirmed, instead of only applying at submit time.
+/// Live discount row and recalculated total the moment a valid promo
+/// code is confirmed, instead of only applying at submit time.
 class _PriceSummary extends StatelessWidget {
   const _PriceSummary({
     required this.basePrice,

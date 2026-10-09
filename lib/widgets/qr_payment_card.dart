@@ -4,15 +4,25 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/booking.dart';
+import '../services/api_service.dart';
 import '../services/booking_service.dart';
 import '../services/upload_service.dart';
 
 const Color _kPrimary = Color(0xFF1B7A6E);
 
+/// Allowed receipt file extensions (JPEG/PNG lang).
+const Set<String> _kAllowedReceiptExtensions = {'jpg', 'jpeg', 'png'};
+
+/// Mirror ng backend REFERENCE_NUMBER_PATTERN: 6-20 chars, letters/numbers/dashes.
+final RegExp _kReferenceNumberPattern = RegExp(r'^[A-Za-z0-9-]{6,20}$');
+
 /// Morphing "Action Required: Secure Your Payment" card.
 ///
-/// FIXED (Flutter Web support): same fix as booking_payment_page.dart —
-/// XFile + cached bytes + Image.memory instead of File + Image.file.
+/// FIXED (Flutter Web support): XFile + cached bytes + Image.memory.
+///
+/// UPDATED (Secure Payment Verification System): required reference
+/// number (format-checked), JPEG/PNG-only check, at instant
+/// submit-masking para walang double-submit.
 class QrPaymentCard extends StatefulWidget {
   const QrPaymentCard({
     super.key,
@@ -33,12 +43,21 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
   final BookingService _bookingService = BookingService();
   final UploadService _uploadService = UploadService();
   final ImagePicker _imagePicker = ImagePicker();
+  final TextEditingController _referenceController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   XFile? _selectedProofImage;
   Uint8List? _selectedProofBytes;
   bool _isSubmitting = false;
   bool _submitted = false;
   String? _errorMessage;
+  String? _fileTypeError;
+
+  @override
+  void dispose() {
+    _referenceController.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant QrPaymentCard oldWidget) {
@@ -50,6 +69,7 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
         _submitted = false;
         _selectedProofImage = null;
         _selectedProofBytes = null;
+        _referenceController.clear();
       });
     }
   }
@@ -80,6 +100,7 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
   Widget _buildActionCard({required Key key}) {
     final weight = widget.booking.finalWeight;
     final price = widget.booking.finalPrice;
+    final canSubmit = _selectedProofImage != null && !_isSubmitting;
 
     return Container(
       key: key,
@@ -88,56 +109,72 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _kPrimary.withOpacity(0.25), width: 1.4),
+        border: Border.all(color: _kPrimary.withValues(alpha: 0.25), width: 1.4),
         boxShadow: [
-          BoxShadow(color: _kPrimary.withOpacity(0.12), blurRadius: 18, spreadRadius: 1, offset: const Offset(0, 6)),
+          BoxShadow(color: _kPrimary.withValues(alpha: 0.12), blurRadius: 18, spreadRadius: 1, offset: const Offset(0, 6)),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: _kPrimary.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.qr_code_2, color: _kPrimary, size: 20),
-              ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text('Action Required: Secure Your Payment', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: _kPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.qr_code_2, color: _kPrimary, size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('Action Required: Secure Your Payment', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildBillRow('Final Weight', weight != null ? '$weight kg' : '—'),
+            const SizedBox(height: 6),
+            _buildBillRow('Total Amount Due', price != null ? '₱${price.toStringAsFixed(2)}' : '—', emphasize: true),
+            const SizedBox(height: 18),
+            _buildQrSection(),
+            const SizedBox(height: 18),
+            _buildReferenceSection(),
+            const SizedBox(height: 18),
+            _buildUploadSection(),
+            if (_fileTypeError != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error_outline_rounded, size: 15, color: Colors.red),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(_fileTypeError!, style: const TextStyle(color: Colors.red, fontSize: 12.5))),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          _buildBillRow('Final Weight', weight != null ? '$weight kg' : '—'),
-          const SizedBox(height: 6),
-          _buildBillRow('Total Amount Due', price != null ? '₱${price.toStringAsFixed(2)}' : '—', emphasize: true),
-          const SizedBox(height: 18),
-          _buildQrSection(),
-          const SizedBox(height: 18),
-          _buildUploadSection(),
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 10),
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
-          ],
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _kPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 10),
+              Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kPrimary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: canSubmit ? _handleSubmit : null,
+                child: _isSubmitting
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Submit Payment Verification'),
               ),
-              onPressed: (_selectedProofImage == null || _isSubmitting) ? null : _handleSubmit,
-              child: _isSubmitting
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Submit Payment Verification'),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -205,6 +242,48 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
     );
   }
 
+  /// NEW — required reference number field.
+  Widget _buildReferenceSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Reference Number', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+        const SizedBox(height: 10),
+        TextFormField(
+          controller: _referenceController,
+          enabled: !_isSubmitting,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            hintText: 'e.g. 1234567890123',
+            hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+            filled: true,
+            fillColor: Colors.grey.shade50,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kPrimary, width: 1.5)),
+            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.red)),
+            focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.red, width: 1.5)),
+          ),
+          validator: (value) {
+            final cleaned = (value ?? '').trim();
+            if (cleaned.isEmpty) return 'Please enter the reference number from your receipt.';
+            if (!_kReferenceNumberPattern.hasMatch(cleaned)) {
+              return 'Enter 6–20 letters/numbers from your receipt (no spaces).';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Makikita sa GCash/Maya/bank receipt — "Ref No." o "Transaction ID".',
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.3),
+        ),
+      ],
+    );
+  }
+
   Widget _buildUploadSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,14 +291,14 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
         const Text('Upload Proof of Payment Screenshot', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
         const SizedBox(height: 10),
         GestureDetector(
-          onTap: _pickProofImage,
+          onTap: _isSubmitting ? null : _pickProofImage,
           child: Container(
             width: double.infinity,
             height: 140,
             decoration: BoxDecoration(
               color: Colors.grey.shade50,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: _selectedProofBytes == null ? Colors.grey.shade300 : _kPrimary),
             ),
             child: _selectedProofBytes == null
                 ? Center(
@@ -228,7 +307,7 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
                       children: [
                         Icon(Icons.attach_file, size: 28, color: Colors.grey.shade500),
                         const SizedBox(height: 6),
-                        Text('Tap to attach a screenshot', style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5)),
+                        Text('Tap to attach a screenshot (JPEG/PNG only)', style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5)),
                       ],
                     ),
                   )
@@ -271,14 +350,30 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
     );
   }
 
+  String _extensionOf(String name) {
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex == -1 || dotIndex == name.length - 1) return '';
+    return name.substring(dotIndex + 1).toLowerCase();
+  }
+
   Future<void> _pickProofImage() async {
     final picked = await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
+
+    final extension = _extensionOf(picked.name);
+    if (!_kAllowedReceiptExtensions.contains(extension)) {
+      setState(() {
+        _fileTypeError = 'Only JPEG or PNG screenshots are allowed. Please pick a different file.';
+      });
+      return;
+    }
+
     final bytes = await picked.readAsBytes();
     if (!mounted) return;
     setState(() {
       _selectedProofImage = picked;
       _selectedProofBytes = bytes;
+      _fileTypeError = null;
       _errorMessage = null;
     });
   }
@@ -302,15 +397,24 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
     final bookingId = widget.booking.id;
     final image = _selectedProofImage;
     if (bookingId == null || image == null) return;
+    if (_isSubmitting) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    // Synchronous setState BEFORE any await — sinasara agad ang double-tap window.
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
     });
 
+    final referenceNumber = _referenceController.text.trim().toUpperCase();
+
     try {
       final proofUrl = await _uploadService.uploadPaymentProof(imageFile: image, bookingId: bookingId);
-      await _bookingService.submitPaymentProof(bookingId: bookingId, proofOfPaymentUrl: proofUrl);
+      await _bookingService.submitPaymentProof(
+        bookingId: bookingId,
+        proofOfPaymentUrl: proofUrl,
+        referenceNumber: referenceNumber,
+      );
 
       if (!mounted) return;
       setState(() {
@@ -318,11 +422,14 @@ class _QrPaymentCardState extends State<QrPaymentCard> {
         _isSubmitting = false;
       });
       widget.onSubmitted?.call();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
+      final message = e is ApiException && e.message.trim().isNotEmpty
+          ? e.message
+          : 'Could not submit your payment proof. Please try again.';
       setState(() {
         _isSubmitting = false;
-        _errorMessage = 'Could not submit your payment proof. Please try again.';
+        _errorMessage = message;
       });
     }
   }

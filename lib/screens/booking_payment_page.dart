@@ -4,19 +4,29 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/booking.dart';
+import '../services/api_service.dart';
 import '../services/booking_service.dart';
 import '../services/upload_service.dart';
 
 const Color _kPrimary = Color(0xFF1B7A6E);
 
+/// Allowed receipt file extensions (JPEG/PNG lang). Second guard laban sa
+/// renamed/mis-reported na file kahit image-only na ang gallery picker.
+const Set<String> _kAllowedReceiptExtensions = {'jpg', 'jpeg', 'png'};
+
+/// Mirror ng backend REFERENCE_NUMBER_PATTERN (schemas.py): 6-20 chars,
+/// letters/numbers/dashes lang. Backend pa rin ang source of truth.
+final RegExp _kReferenceNumberPattern = RegExp(r'^[A-Za-z0-9-]{6,20}$');
+
 /// Module C — Dynamic Conditional Payment Screen.
 ///
-/// FIXED (Flutter Web support): dating `File? _selectedProofImage`
-/// (dart:io) na ipinapakita gamit ang `Image.file` — hindi suportado
-/// sa Flutter Web ("Image.file is not supported on Flutter Web").
-/// Ngayon, `XFile` (cross-platform, mula sa image_picker) ang tinatago
-/// kasabay ng cached bytes (`_selectedProofBytes`) para sa preview
-/// gamit ang `Image.memory` — gumagana ito pareho sa web at mobile.
+/// FIXED (Flutter Web support): XFile + cached bytes + Image.memory
+/// sa halip na File + Image.file.
+///
+/// UPDATED (Secure Payment Verification System): required na ang
+/// reference number (format-checked), JPEG/PNG lang ang tinatanggap, at
+/// ang Submit button ay nagda-disable agad pag-tap (setState bago ang
+/// unang await) para hindi ma-double-submit.
 class BookingPaymentPage extends StatefulWidget {
   const BookingPaymentPage({
     super.key,
@@ -39,6 +49,8 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
   final BookingService _bookingService = BookingService();
   final UploadService _uploadService = UploadService();
   final ImagePicker _imagePicker = ImagePicker();
+  final TextEditingController _referenceController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   XFile? _selectedProofImage;
   Uint8List? _selectedProofBytes;
@@ -46,6 +58,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
   bool _isSubmitting = false;
   bool _submitted = false;
   String? _errorMessage;
+  String? _fileTypeError;
 
   bool get _isCashLike =>
       widget.booking.paymentMethod == 'cash' || widget.booking.paymentMethod == 'cod';
@@ -58,6 +71,12 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
 
   String? get _qrUrl =>
       widget.booking.paymentMethod == 'gcash' ? widget.gcashQrUrl : widget.paymayaQrUrl;
+
+  @override
+  void dispose() {
+    _referenceController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +107,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
             width: 96,
             height: 96,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: _kPrimary.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: _kPrimary.withValues(alpha: 0.1), shape: BoxShape.circle),
             child: const Icon(Icons.payments_outlined, size: 46, color: _kPrimary),
           ),
           const SizedBox(height: 24),
@@ -99,7 +118,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: Colors.grey.shade200),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
             ),
             child: Column(
               children: [
@@ -149,41 +168,58 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
 
     final finalPrice = widget.booking.finalPrice;
     final finalWeight = widget.booking.finalWeight;
+    final canSubmit = _selectedProofImage != null && !_isSubmitting;
 
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        _buildBillSummary(finalWeight, finalPrice),
-        const SizedBox(height: 24),
-        _buildQrSection(),
-        const SizedBox(height: 24),
-        _buildUploadSection(),
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 12),
-          Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 13)),
-        ],
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _kPrimary,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    return Form(
+      key: _formKey,
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _buildBillSummary(finalWeight, finalPrice),
+          const SizedBox(height: 24),
+          _buildQrSection(),
+          const SizedBox(height: 24),
+          _buildReferenceSection(),
+          const SizedBox(height: 24),
+          _buildUploadSection(),
+          if (_fileTypeError != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 16, color: Colors.red),
+                const SizedBox(width: 6),
+                Expanded(child: Text(_fileTypeError!, style: const TextStyle(color: Colors.red, fontSize: 13))),
+              ],
             ),
-            onPressed: (_selectedProofImage == null || _isSubmitting) ? null : _submitPaymentVerification,
-            child: _isSubmitting
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Submit Payment Verification', style: TextStyle(fontWeight: FontWeight.w700)),
+          ],
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 12),
+            Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+          ],
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kPrimary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: canSubmit ? _submitPaymentVerification : null,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Submit Payment Verification', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -243,7 +279,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
             width: 88,
             height: 88,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), shape: BoxShape.circle),
             child: const Icon(Icons.hourglass_top, size: 40, color: Colors.orange),
           ),
           const SizedBox(height: 20),
@@ -281,7 +317,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -323,7 +359,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 16, offset: const Offset(0, 6))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,6 +423,48 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
     );
   }
 
+  /// NEW — required reference number field, format-checked client-side
+  /// gamit ang parehong pattern ng backend.
+  Widget _buildReferenceSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Reference Number', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 10),
+        TextFormField(
+          controller: _referenceController,
+          enabled: !_isSubmitting,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            hintText: 'e.g. 1234567890123',
+            hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kPrimary, width: 1.6)),
+            errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.red)),
+            focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.red, width: 1.6)),
+          ),
+          validator: (value) {
+            final cleaned = (value ?? '').trim();
+            if (cleaned.isEmpty) return 'Please enter the reference number from your receipt.';
+            if (!_kReferenceNumberPattern.hasMatch(cleaned)) {
+              return 'Enter 6–20 letters/numbers from your receipt (no spaces).';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Makikita ito sa GCash/Maya/bank receipt mo — karaniwang "Ref No." o "Transaction ID".',
+          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, height: 1.3),
+        ),
+      ],
+    );
+  }
+
   Widget _buildUploadSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -394,7 +472,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
         const Text('Upload Proof of Payment / Screenshot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 12),
         GestureDetector(
-          onTap: _isUploadingProof ? null : _pickProofImage,
+          onTap: (_isUploadingProof || _isSubmitting) ? null : _pickProofImage,
           child: Container(
             width: double.infinity,
             height: 170,
@@ -405,7 +483,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
                 color: _selectedProofBytes == null ? Colors.grey.shade300 : _kPrimary,
                 width: _selectedProofBytes == null ? 1.4 : 1.8,
               ),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 12, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 12, offset: const Offset(0, 4))],
             ),
             child: _selectedProofBytes == null
                 ? Center(
@@ -416,19 +494,17 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
                           width: 52,
                           height: 52,
                           alignment: Alignment.center,
-                          decoration: BoxDecoration(color: _kPrimary.withOpacity(0.08), shape: BoxShape.circle),
-                          child: Icon(Icons.add_photo_alternate_outlined, size: 26, color: _kPrimary),
+                          decoration: BoxDecoration(color: _kPrimary.withValues(alpha: 0.08), shape: BoxShape.circle),
+                          child: const Icon(Icons.add_photo_alternate_outlined, size: 26, color: _kPrimary),
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Tap to attach a screenshot',
+                          'Tap to attach a screenshot (JPEG/PNG only)',
                           style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
                   )
-                // FIXED: Image.memory instead of Image.file — works on
-                // Flutter Web AND mobile.
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(15),
                     child: Image.memory(_selectedProofBytes!, fit: BoxFit.cover, width: double.infinity, height: 170),
@@ -438,7 +514,7 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
         if (_selectedProofBytes != null) ...[
           const SizedBox(height: 8),
           TextButton.icon(
-            onPressed: _isUploadingProof ? null : _pickProofImage,
+            onPressed: (_isUploadingProof || _isSubmitting) ? null : _pickProofImage,
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Choose a different image'),
             style: TextButton.styleFrom(foregroundColor: _kPrimary),
@@ -448,14 +524,30 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
     );
   }
 
+  String _extensionOf(String name) {
+    final dotIndex = name.lastIndexOf('.');
+    if (dotIndex == -1 || dotIndex == name.length - 1) return '';
+    return name.substring(dotIndex + 1).toLowerCase();
+  }
+
   Future<void> _pickProofImage() async {
     final picked = await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
+
+    final extension = _extensionOf(picked.name);
+    if (!_kAllowedReceiptExtensions.contains(extension)) {
+      setState(() {
+        _fileTypeError = 'Only JPEG or PNG screenshots are allowed. Please pick a different file.';
+      });
+      return;
+    }
+
     final bytes = await picked.readAsBytes();
     if (!mounted) return;
     setState(() {
       _selectedProofImage = picked;
       _selectedProofBytes = bytes;
+      _fileTypeError = null;
       _errorMessage = null;
     });
   }
@@ -479,16 +571,25 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
     final bookingId = widget.booking.id;
     final image = _selectedProofImage;
     if (bookingId == null || image == null) return;
+    if (_isSubmitting) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    // Synchronous setState BEFORE any await — sinasara agad ang double-tap window.
     setState(() {
       _isSubmitting = true;
       _isUploadingProof = true;
       _errorMessage = null;
     });
 
+    final referenceNumber = _referenceController.text.trim().toUpperCase();
+
     try {
       final proofUrl = await _uploadService.uploadPaymentProof(imageFile: image, bookingId: bookingId);
-      await _bookingService.submitPaymentProof(bookingId: bookingId, proofOfPaymentUrl: proofUrl);
+      await _bookingService.submitPaymentProof(
+        bookingId: bookingId,
+        proofOfPaymentUrl: proofUrl,
+        referenceNumber: referenceNumber,
+      );
 
       if (!mounted) return;
       setState(() {
@@ -498,10 +599,15 @@ class _BookingPaymentPageState extends State<BookingPaymentPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      // Ipakita ang mismong mensahe ng backend (duplicate reference,
+      // OCR "Fraud Alert", atbp.) kung ApiException; generic kung hindi.
+      final message = e is ApiException && e.message.trim().isNotEmpty
+          ? e.message
+          : 'Could not submit your payment proof. Please try again.';
       setState(() {
         _isSubmitting = false;
         _isUploadingProof = false;
-        _errorMessage = 'Could not submit your payment proof. Please try again.';
+        _errorMessage = message;
       });
     }
   }

@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_text_field.dart';
 import '../widgets/auth_layout.dart';
+import 'forgot_password_page.dart';
 import 'main_nav_page.dart';
 import 'register_page.dart';
 
@@ -15,14 +16,6 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-/// UPDATED (bug fix) — pinalitan ang _TapScale para gumamit ng Listener
-/// (raw pointer lang, hindi tap-gesture recognizer) sa halip na
-/// GestureDetector.onTap. Dating pattern: outer GestureDetector may
-/// onTap: _login, habang inner FilledButton naka onPressed: () {}
-/// (walang laman) — nagkaka-conflict sa gesture arena kaya minsan
-/// hindi na-cclick ang button. Ngayon, ang FilledButton mismo ang may
-/// totoong onPressed: _login; ang Listener ay para lang sa visual
-/// "press down" scale effect. Walang binago sa validation/auth logic.
 class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   late final _email = TextEditingController(text: widget.prefilledEmail ?? '');
@@ -61,10 +54,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     }
     setState(() => _loading = true);
     try {
-      // UPDATED — kinukuha na direkta ang Customer mula sa return value
-      // ng login(), sa halip na mag-force-unwrap ng
-      // CustomerSession.instance.customer! — mas ligtas dahil sigurado
-      // tayong hindi null 'to kung umabot dito nang walang exception.
       final customer = await AuthService().login(_email.text.trim(), _password.text);
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -79,17 +68,12 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     }
   }
 
-  Future<void> _forgotPassword() async {
-    if (_email.text.trim().isEmpty || !_email.text.contains('@')) {
-      _message('Enter a valid email address first.');
-      return;
-    }
-    try {
-      await AuthService().forgotPassword(_email.text.trim());
-      if (mounted) _message('Password reset instructions were sent.', success: true);
-    } catch (_) {
-      if (mounted) _message('Could not send reset instructions.');
-    }
+  /// Bubuksan ang Forgot Password flow (email -> code -> bagong password).
+  void _forgotPassword() {
+    Navigator.push(
+      context,
+      _fadeSlideRoute(ForgotPasswordPage(prefilledEmail: _email.text.trim())),
+    );
   }
 
   Animation<double> _fadeFor(double start, double end) => CurvedAnimation(
@@ -128,33 +112,33 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: colors.primary.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(14),
+                      color: colors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 22),
+                    child: Icon(Icons.local_laundry_service_rounded, color: colors.primary, size: 19),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       'Welcome back',
-                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: colors.textPrimary),
+                      style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: colors.textPrimary),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _staggered(
               start: 0.05,
               end: 0.55,
               child: Text(
                 'Sign in to manage your laundry with ease.',
-                style: TextStyle(color: colors.textSecondary),
+                style: TextStyle(fontSize: 13, color: colors.textSecondary),
               ),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 20),
             _staggered(
               start: 0.15,
               end: 0.65,
@@ -170,16 +154,18 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                         : null,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _staggered(
               start: 0.25,
               end: 0.75,
+              // Walang max-length dito sa login, sinadya (para sa lumang account).
               child: AppTextField(
                 controller: _password,
                 label: 'Password *',
                 icon: Icons.lock_outline,
                 obscureText: _hidePassword,
                 suffix: IconButton(
+                  iconSize: 20,
                   icon: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     transitionBuilder: (child, animation) => FadeTransition(
@@ -193,11 +179,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                   ),
                   onPressed: () => setState(() => _hidePassword = !_hidePassword),
                 ),
-                validator: (v) => v == null || v.isEmpty
-                    ? 'Password is required'
-                    : v.length < 6
-                        ? 'Password must be at least 6 characters'
-                        : null,
+                validator: (v) => v == null || v.isEmpty ? 'Password is required' : null,
               ),
             ),
             _staggered(
@@ -205,10 +187,19 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               end: 0.8,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: TextButton(onPressed: _forgotPassword, child: const Text('Forgot password?')),
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: const TextStyle(fontSize: 13),
+                  ),
+                  onPressed: _forgotPassword,
+                  child: const Text('Forgot password?'),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             _staggered(
               start: 0.4,
               end: 0.9,
@@ -216,51 +207,59 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                 enabled: !_loading,
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                     boxShadow: [
                       BoxShadow(
-                        color: colors.primary.withOpacity(_loading ? 0 : 0.30),
-                        blurRadius: 16,
-                        offset: const Offset(0, 7),
+                        color: colors.primary.withValues(alpha: _loading ? 0 : 0.30),
+                        blurRadius: 12,
+                        offset: const Offset(0, 5),
                       ),
                     ],
                   ),
                   child: FilledButton(
-                    // FIX: totoong onPressed dito mismo (_login),
-                    // hindi na empty closure.
                     onPressed: _loading ? null : _login,
                     style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
+                      minimumSize: const Size.fromHeight(46),
                       backgroundColor: colors.primary,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: colors.primary.withOpacity(0.7),
+                      disabledBackgroundColor: colors.primary.withValues(alpha: 0.7),
                       disabledForegroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 200),
                       child: _loading
                           ? const SizedBox(
                               key: ValueKey('loading'),
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
                             )
-                          : const Text('Sign in', key: ValueKey('label'), style: TextStyle(fontWeight: FontWeight.w700)),
+                          : const Text(
+                              'Sign in',
+                              key: ValueKey('label'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                            ),
                     ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             _staggered(
               start: 0.5,
               end: 1.0,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text("Don't have an account?"),
+                  const Text("Don't have an account?", style: TextStyle(fontSize: 13)),
                   TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
                     onPressed: () => Navigator.push(
                       context,
                       _fadeSlideRoute(const RegisterPage()),
@@ -277,10 +276,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   }
 }
 
-/// FIX: Listener na lang (raw pointer, walang tap-arena participation)
-/// para sa "press down" visual scale. Ang totoong onPressed ay nasa
-/// FilledButton mismo sa loob ng child — kaya wala nang conflict sa
-/// gesture arena.
+/// Listener-based "press down" scale; ang totoong tap ay hawak ng FilledButton.
 class _TapScale extends StatefulWidget {
   const _TapScale({required this.child, this.enabled = true});
   final Widget child;

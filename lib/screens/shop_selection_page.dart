@@ -4,6 +4,7 @@ import '../models/shop.dart';
 import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/illustrated_icon.dart';
+import '../widgets/rating_badge.dart';
 import 'shop_detail_page.dart';
 
 class ShopSelectionPage extends StatefulWidget {
@@ -235,11 +236,17 @@ class _ShopListTile extends StatelessWidget {
                     style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                   ),
                   const SizedBox(height: 8),
-                  Row(
+                  // UPDATED (Rating after order) — Wrap (dating Row) para
+                  // hindi mag-overflow sa makikitid na screen kapag
+                  // sabay-sabay ang Open/Closed badge, distance chip, at
+                  // rating badge; bababa lang sa susunod na linya.
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       _StatusBadge(isOnline: shop.isOnline),
-                      if (shop.distanceKm != null) ...[
-                        const SizedBox(width: 10),
+                      if (shop.distanceKm != null)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(20)),
@@ -255,7 +262,8 @@ class _ShopListTile extends StatelessWidget {
                             ],
                           ),
                         ),
-                      ],
+                      if (RatingBadge.hasRating(shop.averageRating, shop.ratingCount))
+                        RatingBadge(averageRating: shop.averageRating, ratingCount: shop.ratingCount),
                     ],
                   ),
                 ],

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/shop.dart';
 import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/rating_badge.dart';
 import 'booking_form_page.dart';
 
 class ShopDetailPage extends StatefulWidget {
@@ -106,7 +107,21 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _ShopStatusPill(isOnline: isShopOnline),
+                      // UPDATED (Rating after order) — Wrap (hindi Row)
+                      // para hindi mag-overflow sa makikitid na screen
+                      // kapag magkatabi ang status pill at rating badge.
+                      // Walang lalabas na rating badge kung wala pang
+                      // rating ang shop (see RatingBadge).
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _ShopStatusPill(isOnline: isShopOnline),
+                          if (RatingBadge.hasRating(shop.averageRating, shop.ratingCount))
+                            RatingBadge(averageRating: shop.averageRating, ratingCount: shop.ratingCount),
+                        ],
+                      ),
                       const SizedBox(height: 14),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,

@@ -7,19 +7,18 @@ import '../widgets/app_text_field.dart';
 import '../widgets/auth_layout.dart';
 import 'verify_otp_page.dart';
 
+/// Password rule (palitan lang dito kung gusto mong baguhin).
+/// Sa SIGNUP lang ito, hindi sa login, para hindi ma-lock out ang
+/// mga lumang account na mas mahaba ang password.
+const int kPasswordMin = 8;
+const int kPasswordMax = 12;
+
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
   @override
   State<RegisterPage> createState() => _RegisterPageState();
 }
 
-/// UPDATED (bug fix) — pinalitan ang _TapScale para gumamit ng Listener
-/// (raw pointer tracking lang, hindi tap-gesture recognizer) sa halip
-/// na GestureDetector.onTap. Dating pattern: outer GestureDetector may
-/// onTap, inner FilledButton naka onPressed:null — minsan nagkaka-
-/// conflict sa gesture arena kaya "di na-cclick" ang button. Ngayon,
-/// ang FilledButton mismo ang may totoong onPressed; ang Listener ay
-/// para lang sa visual "press down" scale effect.
 class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
@@ -33,11 +32,18 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
 
   late final AnimationController _entrance;
 
+  bool get _lengthOk =>
+      _password.text.length >= kPasswordMin && _password.text.length <= kPasswordMax;
+
   @override
   void initState() {
     super.initState();
     _entrance = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
     _entrance.forward();
+    // Para mag-update ang live checklist habang nagta-type.
+    _password.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -116,6 +122,26 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
         ),
       );
 
+  /// Live checklist: abo kung walang laman, berde kung pasado, pula kung hindi.
+  Widget _passwordRules(AppColors colors) {
+    final empty = _password.text.isEmpty;
+    final ok = _lengthOk;
+    final color = empty ? colors.textMuted : (ok ? colors.success : colors.error);
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, top: 6),
+      child: Row(
+        children: [
+          Icon(ok ? Icons.check_circle_rounded : Icons.circle_outlined, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            '$kPasswordMin–$kPasswordMax characters',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -132,33 +158,33 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: colors.primary.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(14),
+                      color: colors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.person_add_alt_1_rounded, color: colors.primary, size: 22),
+                    child: Icon(Icons.person_add_alt_1_rounded, color: colors.primary, size: 19),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       'Create your account',
-                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: colors.textPrimary),
+                      style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: colors.textPrimary),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _staggered(
               start: 0.03,
               end: 0.43,
               child: Text(
                 'Get dependable laundry care in one place.',
-                style: TextStyle(color: colors.textSecondary),
+                style: TextStyle(fontSize: 13, color: colors.textSecondary),
               ),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 18),
             _staggered(
               start: 0.1,
               end: 0.5,
@@ -169,7 +195,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                 validator: (v) => v == null || v.trim().isEmpty ? 'Full name is required' : null,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 11),
             _staggered(
               start: 0.16,
               end: 0.56,
@@ -185,7 +211,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                         : null,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 11),
             _staggered(
               start: 0.22,
               end: 0.62,
@@ -198,7 +224,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 prefixText: Text(
                   '+63 ',
-                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: colors.textPrimary),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colors.textPrimary),
                 ),
                 validator: (v) => v == null || v.trim().isEmpty
                     ? 'Mobile number is required'
@@ -209,27 +235,37 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                             : null,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 11),
             _staggered(
               start: 0.28,
               end: 0.68,
-              child: AppTextField(
-                controller: _password,
-                label: 'Password *',
-                icon: Icons.lock_outline,
-                obscureText: _hidePassword,
-                suffix: IconButton(
-                  icon: _animatedVisibilityIcon(_hidePassword),
-                  onPressed: () => setState(() => _hidePassword = !_hidePassword),
-                ),
-                validator: (v) => v == null || v.isEmpty
-                    ? 'Password is required'
-                    : v.length < 6
-                        ? 'Password must be at least 6 characters'
-                        : null,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppTextField(
+                    controller: _password,
+                    label: 'Password *',
+                    icon: Icons.lock_outline,
+                    obscureText: _hidePassword,
+                    // Hindi na makakapag-type ng lampas 12.
+                    inputFormatters: [LengthLimitingTextInputFormatter(kPasswordMax)],
+                    suffix: IconButton(
+                      iconSize: 20,
+                      icon: _animatedVisibilityIcon(_hidePassword),
+                      onPressed: () => setState(() => _hidePassword = !_hidePassword),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Password is required';
+                      if (v.length < kPasswordMin) return 'Password must be at least $kPasswordMin characters';
+                      if (v.length > kPasswordMax) return 'Password must be at most $kPasswordMax characters';
+                      return null;
+                    },
+                  ),
+                  _passwordRules(colors),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 11),
             _staggered(
               start: 0.34,
               end: 0.74,
@@ -238,7 +274,9 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                 label: 'Confirm password *',
                 icon: Icons.lock_outline,
                 obscureText: _hideConfirmPassword,
+                inputFormatters: [LengthLimitingTextInputFormatter(kPasswordMax)],
                 suffix: IconButton(
+                  iconSize: 20,
                   icon: _animatedVisibilityIcon(_hideConfirmPassword),
                   onPressed: () => setState(() => _hideConfirmPassword = !_hideConfirmPassword),
                 ),
@@ -249,7 +287,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                         : null,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             _staggered(
               start: 0.45,
               end: 0.9,
@@ -257,38 +295,39 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                 enabled: !_loading,
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                     boxShadow: [
                       BoxShadow(
-                        color: colors.primary.withOpacity(_loading ? 0 : 0.30),
-                        blurRadius: 16,
-                        offset: const Offset(0, 7),
+                        color: colors.primary.withValues(alpha: _loading ? 0 : 0.30),
+                        blurRadius: 12,
+                        offset: const Offset(0, 5),
                       ),
                     ],
                   ),
                   child: FilledButton(
-                    // FIX: totoong onPressed na dito mismo (_register),
-                    // hindi na empty closure na naka-depend sa outer
-                    // GestureDetector.
                     onPressed: _loading ? null : _register,
                     style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
+                      minimumSize: const Size.fromHeight(46),
                       backgroundColor: colors.primary,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: colors.primary.withOpacity(0.7),
+                      disabledBackgroundColor: colors.primary.withValues(alpha: 0.7),
                       disabledForegroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 200),
                       child: _loading
                           ? const SizedBox(
                               key: ValueKey('loading'),
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
                             )
-                          : const Text('Create account', key: ValueKey('label'), style: TextStyle(fontWeight: FontWeight.w700)),
+                          : const Text(
+                              'Create account',
+                              key: ValueKey('label'),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                            ),
                     ),
                   ),
                 ),
@@ -298,6 +337,12 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
               start: 0.55,
               end: 1.0,
               child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(fontSize: 13),
+                ),
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Already have an account? Sign in'),
               ),
@@ -309,11 +354,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
   }
 }
 
-/// FIX: Listener na lang (raw pointer events) sa halip na GestureDetector
-/// para sa "press down" visual scale — hindi na siya lumalahok sa tap
-/// gesture arena, kaya walang conflict sa totoong onPressed ng button
-/// sa loob. Wala nang onTap parameter dito — ang totoong tap ay hawak
-/// na ng FilledButton/IconButton mismo.
+/// Listener-based "press down" scale; ang totoong tap ay hawak ng FilledButton.
 class _TapScale extends StatefulWidget {
   const _TapScale({required this.child, this.enabled = true});
   final Widget child;

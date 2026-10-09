@@ -6,6 +6,8 @@ import '../models/shop.dart';
 import '../services/booking_service.dart';
 import '../services/realtime_service.dart';
 import '../widgets/qr_payment_card.dart';
+import '../widgets/time_window_selector.dart';
+import 'edit_booking_page.dart';
 
 /// Neon-blue palette for reached/active timeline steps (spec §2:
 /// "vibrant neon-blue color profile scheme"). Unreached steps use this
@@ -22,12 +24,11 @@ const Color _kNeonBlueDark = Color(0xFF0091EA);
 /// changes this booking's status, weighs it, finalizes pricing, or
 /// verifies/rejects payment from the web terminal.
 ///
-/// [shop] is optional and only used to source the QR code image
-/// (Shop.qrCodeUrl) for the morphing payment card that appears once
-/// the booking status becomes "Awaiting Payment" with an online_qr
-/// payment method — pass it in when the caller already has the Shop
-/// object handy (e.g. navigating straight from ShopDetailPage/
-/// BookingConfirmationPage) to avoid a second network round trip.
+/// [shop] is optional and used both to source the QR code image
+/// (Shop.qrCodeUrl) for the morphing payment card, AND (NEW — Flexible
+/// Booking feature) to let EditBookingPage know whether Online Payment
+/// is currently available if the customer opens "Edit booking" from
+/// here.
 class OrderTrackingPage extends StatefulWidget {
   const OrderTrackingPage({super.key, required this.bookingId, this.shop});
 
@@ -54,6 +55,12 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       _booking != null &&
       _booking!.status == BookingStatus.awaitingPayment &&
       _booking!.paymentMethod == 'online_qr';
+
+  /// NEW (Flexible Booking — Edit Booking feature) — "Edit booking"
+  /// lang lumalabas habang naghihintay pa ng Accept/Decline ang shop.
+  /// Pagkatapos ma-accept, mismong booking na 'to ang naglipat na sa
+  /// weighing flow, kaya hindi na dapat mabago.
+  bool get _canEdit => _booking != null && _booking!.status == BookingStatus.awaitingApproval;
 
   @override
   void initState() {
@@ -108,6 +115,25 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
 
   Future<void> _handleRefresh() => _loadInitial();
 
+  /// NEW (Flexible Booking — Edit Booking feature) — opens
+  /// EditBookingPage for the current booking. On return, refreshes from
+  /// REST regardless of the pop result — Realtime should also push the
+  /// update automatically (it's listening on the bookings row itself),
+  /// but an explicit refresh here means the person sees their change
+  /// reflected immediately even if the Realtime event is a beat slow.
+  Future<void> _openEdit() async {
+    final booking = _booking;
+    if (booking == null) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EditBookingPage(booking: booking, shop: widget.shop),
+      ),
+    );
+    if (!mounted) return;
+    _loadInitial();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -151,6 +177,15 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       children: [
         _buildHeader(booking),
         const SizedBox(height: 20),
+
+        // NEW (Flexible Booking feature) — shows the customer's
+        // preferred drop-off/pickup schedule (exact time and/or time
+        // window) when either is set. Purely informational — actual
+        // change happens via "Edit booking" in the header above.
+        if (_hasScheduleInfo(booking)) ...[
+          _buildScheduleCard(booking),
+          const SizedBox(height: 20),
+        ],
 
         // --- Morphing payment action card (spec §3) ---
         // AnimatedSize + AnimatedCrossFade give the physics-based morph
@@ -200,6 +235,68 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
     );
   }
 
+  bool _hasScheduleInfo(Booking booking) {
+    if (booking.fulfillmentMode == 'delivery') {
+      return booking.pickupDatetime != null || booking.pickupWindow != null;
+    }
+    return booking.dropoffDatetime != null || booking.dropoffWindow != null;
+  }
+
+  /// NEW (Flexible Booking feature) — simpleng card na nagpapakita ng
+  /// naka-set na preferred na oras (exact) at/o time window para sa
+  /// drop-off o pickup, depende sa fulfillment mode ng booking.
+  Widget _buildScheduleCard(Booking booking) {
+    final isDelivery = booking.fulfillmentMode == 'delivery';
+    final exact = isDelivery ? booking.pickupDatetime : booking.dropoffDatetime;
+    final windowKey = isDelivery ? booking.pickupWindow : booking.dropoffWindow;
+    final windowLabel = timeWindowLabel(windowKey);
+    final title = isDelivery ? 'Pickup schedule' : 'Drop-off schedule';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 14, offset: const Offset(0, 4))],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: _kNeonBlue.withOpacity(0.10), shape: BoxShape.circle),
+            child: const Icon(Icons.event_available_rounded, color: _kNeonBlueDark, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black87)),
+                const SizedBox(height: 4),
+                if (exact != null)
+                  Text(
+                    DateFormat('MMM d, yyyy · hh:mm a').format(exact.toLocal()),
+                    style: const TextStyle(fontSize: 13, color: Colors.black54),
+                  ),
+                if (windowLabel != null)
+                  Padding(
+                    padding: EdgeInsets.only(top: exact != null ? 2 : 0),
+                    child: Text(
+                      exact != null ? 'Preferred window: $windowLabel' : windowLabel,
+                      style: const TextStyle(fontSize: 12.5, color: Colors.black45),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader(Booking booking) {
     return Container(
       width: double.infinity,
@@ -218,14 +315,50 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            booking.shopName,
-            style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            booking.serviceName,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+          // NEW (Flexible Booking feature) — "Edit booking" sa itaas
+          // kanan, lumalabas lang habang "Awaiting Approval" pa
+          // (_canEdit). Nasa Row para hindi masagi ang shop/service
+          // name kahit sino ang mas mahaba.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      booking.shopName,
+                      style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8), fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      booking.serviceName,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
+              if (_canEdit)
+                InkWell(
+                  onTap: _openEdit,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit_outlined, size: 14, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text('Edit', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 10),
           Container(

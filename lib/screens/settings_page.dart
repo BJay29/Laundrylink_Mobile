@@ -130,7 +130,7 @@ class SettingsPage extends StatelessWidget {
 
           const SizedBox(height: 28),
           Center(
-            child: Text('LaundryLink v1.0.0', style: TextStyle(fontSize: 12, color: colors.textMuted)),
+            child: Text('LaundryLink v1.1.0', style: TextStyle(fontSize: 12, color: colors.textMuted)),
           ),
         ],
       ),

@@ -107,6 +107,8 @@ class Shop {
     this.acceptsCash = true,
     this.acceptsCod = false,
     this.acceptsOnline = false,
+    this.averageRating,
+    this.ratingCount = 0,
   });
 
   final int id;
@@ -177,6 +179,15 @@ class Shop {
   final bool acceptsCod;
   final bool acceptsOnline;
 
+  /// NEW (Rating after order) — average na bituin ng shop (1.0 hanggang
+  /// 5.0, isang decimal) at kung ilang rating ang pinagbasehan. Galing
+  /// sa backend's average_rating / rating_count, na laman sa BOTH
+  /// GET /shops/ (listing) at GET /shops/{id} (detail). `averageRating`
+  /// ay null (at `ratingCount` 0) kapag wala pang rating ang shop —
+  /// see widgets/rating_badge.dart para sa display.
+  final double? averageRating;
+  final int ratingCount;
+
   factory Shop.fromJson(Map<String, dynamic> json) => Shop(
         id: json['id'] as int,
         shopName: json['shop_name'] as String,
@@ -206,5 +217,7 @@ class Shop {
         acceptsCash: json['accepts_cash'] as bool? ?? true,
         acceptsCod: json['accepts_cod'] as bool? ?? false,
         acceptsOnline: json['accepts_online'] as bool? ?? false,
+        averageRating: (json['average_rating'] as num?)?.toDouble(),
+        ratingCount: json['rating_count'] as int? ?? 0,
       );
 }

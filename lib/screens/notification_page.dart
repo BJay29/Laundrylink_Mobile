@@ -70,6 +70,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  /// Optimistic local update — agad na nagbabago ang UI state (read
+  /// dot mawawala) BAGO pa man matapos ang network call. Ang network
+  /// PATCH request ay tumatakbo pa rin dito sa loob (para ma-sync sa
+  /// backend), pero HINDI na ito hinihintay ng caller (_handleTap) —
+  /// see fix note doon.
   Future<void> _markRead(NotificationItem item) async {
     if (item.isRead) return;
 
@@ -86,16 +91,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  /// UPDATED (notification detail view): pag-tap ng isang notification
-  /// tile ay hindi na diretsong pumupunta sa BookingPage — muna
-  /// itong nagpapakita ng _NotificationDetailSheet na naglalaman ng
-  /// EKSAKTONG laman ng notification mismo (icon batay sa type, buong
-  /// title, buong message, oras) — ito na yung "kung ano mismo ang
-  /// nasa notification". Sa loob ng sheet mismo, kung may bookingId,
-  /// meron pang "View Booking" button na siyang pupunta sa
-  /// BookingPageScaffold — hiwalay na hakbang, hindi na awtomatiko.
+  /// FIX (di-maclick na notifications) — dati, `await _markRead(item)`
+  /// ang tawag dito, na nangangahulugang hinihintay muna ng buong
+  /// function na 'to ang PATCH /notifications/{id}/read na network
+  /// request BAGO magpakita ng detail sheet. Ngayon, TINATAWAG lang si
+  /// _markRead(item) nang WALANG await — ang setState() sa loob nito
+  /// ay tumatakbo pa ring SYNCHRONOUS (bago pa man umabot sa unang
+  /// `await` sa loob ng function), kaya gumagana pa rin agad ang
+  /// optimistic UI update; ang network call na lang ang tumatakbo sa
+  /// background nang hindi na hinihintay bago lumabas ang sheet.
   Future<void> _handleTap(NotificationItem item) async {
-    await _markRead(item);
+    _markRead(item);
     if (!mounted) return;
 
     await showModalBottomSheet<void>(
@@ -136,6 +142,67 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  /// NEW (swipe-to-dismiss) — asks for confirmation before a swipe is
+  /// allowed to complete (Dismissible's confirmDismiss). Returning
+  /// true lets the item animate away; false snaps it back in place.
+  Future<bool> _confirmDismiss(NotificationItem item) async {
+    final colors = context.colors;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: colors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Remove notification?', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w800)),
+        content: Text(
+          'This will remove it from your list. This can\'t be undone.',
+          style: TextStyle(color: colors.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('Remove', style: TextStyle(color: colors.error, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  /// NEW (swipe-to-dismiss) — optimistically removes the item from the
+  /// local list right away (so the swipe animation completes cleanly),
+  /// then fires the DELETE call in the background. On failure, the
+  /// item is quietly re-inserted at its original index and a snackbar
+  /// lets the person know, instead of leaving the UI silently
+  /// out-of-sync with the backend.
+Future<void> _handleDismiss(NotificationItem item) async {
+  final currentList = _notifications ?? <NotificationItem>[];
+  final removedIndex = currentList.indexWhere((n) => n.id == item.id);
+  if (removedIndex == -1) return;
+
+  setState(() {
+    _notifications = List<NotificationItem>.of(currentList)..removeAt(removedIndex);
+  });
+
+  try {
+    await _notificationService.deleteNotification(item.id);
+  } catch (_) {
+    if (!mounted) return;
+    setState(() {
+      final restored = List<NotificationItem>.of(_notifications ?? <NotificationItem>[]);
+      final insertAt = removedIndex.clamp(0, restored.length);
+      restored.insert(insertAt, item);
+      _notifications = restored;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not remove that notification. Please try again.')),
+    );
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -175,7 +242,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         child: ListView.separated(
           padding: const EdgeInsets.all(20),
           itemCount: visible.length + (hasMore ? 1 : 0),
-          separatorBuilder: (_, _) => const SizedBox(height: 12),
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             if (index >= visible.length) {
               final remaining = notifications.length - visible.length;
@@ -190,9 +257,32 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 ),
               );
             }
-            return _NotificationTile(
-              item: visible[index],
-              onTap: () => _handleTap(visible[index]),
+            final item = visible[index];
+            // NEW — Dismissible wraps each tile: swipe left-to-right
+            // reveals a red "delete" background and, once confirmed,
+            // removes the notification. Key must be stable per item
+            // (notification id) so Flutter tracks the right widget
+            // through the removeAt() rebuild.
+            return Dismissible(
+              key: ValueKey(item.id),
+              direction: DismissDirection.endToStart,
+              confirmDismiss: (_) => _confirmDismiss(item),
+              onDismissed: (_) => _handleDismiss(item),
+              background: const SizedBox.shrink(),
+              secondaryBackground: Container(
+                margin: const EdgeInsets.only(left: 40),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                alignment: Alignment.centerRight,
+                decoration: BoxDecoration(
+                  color: colors.error,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 24),
+              ),
+              child: _NotificationTile(
+                item: item,
+                onTap: () => _handleTap(item),
+              ),
             );
           },
         ),
@@ -205,6 +295,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
         backgroundColor: colors.surface,
         elevation: 0,
         foregroundColor: colors.textPrimary,
+        // Naka-Navigator.push() ang page na ito (see _openNotifications
+        // sa main_nav_page.dart), kaya automatic na dapat lumabas ang
+        // back arrow dahil may dating route na (MainNavPage) na
+        // pwedeng balikan — walang kailangang i-set na `leading` dito.
         title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w700)),
         actions: [
           if (hasUnread)
@@ -373,7 +467,7 @@ class _NotificationTile extends StatelessWidget {
   }
 }
 
-/// NEW — buong laman ng isang notification mismo (icon, buong title,
+/// buong laman ng isang notification mismo (icon, buong title,
 /// buong message, buong timestamp — walang truncation, di gaya ng
 /// tile na naka-2-lines lang ang message). Ito ang "kung ano mismo
 /// ang nasa notification" na lumalabas pag tinap ang isang tile,
