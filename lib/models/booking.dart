@@ -69,6 +69,29 @@ BookingStatus _statusFromApi(String? raw) {
   }
 }
 
+/// FIXED (timezone) — ang backend ay nagbabalik ng timestamps na may
+/// timezone offset (UTC). Ang `DateTime.tryParse()` ay nagbabalik ng
+/// UTC DateTime sa ganoong kaso, at ang `.hour`/`.day` nito ay UTC —
+/// kaya 8 oras ang aatras sa Manila kapag direktang ipinakita. Dito
+/// pa lang ay kino-convert na sa local time ng device, para tama ang
+/// lahat ng display sa buong app (booking form, edit page, tracking).
+///
+/// IMPORTANT: may mga column sa database na `timestamp` (WALANG
+/// timezone) kaya ibinabalik ng backend ang string nang walang "Z" o
+/// offset (hal. "2026-11-03T07:18:00"). Itinuturing ng Dart na LOCAL
+/// ang ganoong string, kaya hindi na kino-convert at lumalabas ang UTC
+/// na oras bilang kung ito'y local (8 oras ang atras sa Manila). Ang
+/// lahat ng timestamp ng backend ay UTC, kaya kapag walang timezone,
+/// dinadagdagan natin ng "Z" bago i-parse.
+DateTime? _parseDate(dynamic value) {
+  if (value == null) return null;
+  var text = (value as String).trim();
+  if (text.isEmpty) return null;
+  final hasZone = RegExp(r'(Z|[+-]\d{2}:?\d{2})$').hasMatch(text);
+  if (!hasZone) text = '${text}Z';
+  return DateTime.tryParse(text)?.toLocal();
+}
+
 /// Mirrors the backend's MachineAssignmentResponse (one row per
 /// load in a multi-machine booking — see BookingMachineAssignment in
 /// app/models.py). `phase` is "washing" | "drying" | "done" and is the
@@ -108,18 +131,10 @@ class BookingMachineAssignment {
         phase: json['phase'] as String? ?? 'washing',
         washerNumber: json['washer_number'] as int?,
         dryerNumber: json['dryer_number'] as int?,
-        washingStartedAt: json['washing_started_at'] == null
-            ? null
-            : DateTime.tryParse(json['washing_started_at'] as String),
-        washingCompletedAt: json['washing_completed_at'] == null
-            ? null
-            : DateTime.tryParse(json['washing_completed_at'] as String),
-        dryingStartedAt: json['drying_started_at'] == null
-            ? null
-            : DateTime.tryParse(json['drying_started_at'] as String),
-        dryingCompletedAt: json['drying_completed_at'] == null
-            ? null
-            : DateTime.tryParse(json['drying_completed_at'] as String),
+        washingStartedAt: _parseDate(json['washing_started_at']),
+        washingCompletedAt: _parseDate(json['washing_completed_at']),
+        dryingStartedAt: _parseDate(json['drying_started_at']),
+        dryingCompletedAt: _parseDate(json['drying_completed_at']),
       );
 }
 
@@ -318,31 +333,21 @@ class Booking {
         loads: json['loads'] as int?,
         fulfillmentMode: json['fulfillment_mode'] as String?,
         specialInstructions: json['special_instructions'] as String?,
-        pickupDatetime: json['pickup_datetime'] == null
-            ? null
-            : DateTime.tryParse(json['pickup_datetime'] as String),
-        dropoffDatetime: json['dropoff_datetime'] == null
-            ? null
-            : DateTime.tryParse(json['dropoff_datetime'] as String),
+        pickupDatetime: _parseDate(json['pickup_datetime']),
+        dropoffDatetime: _parseDate(json['dropoff_datetime']),
         dropoffWindow: json['dropoff_window'] as String?,
         pickupWindow: json['pickup_window'] as String?,
-        deliveryDatetime: json['delivery_datetime'] == null
-            ? null
-            : DateTime.tryParse(json['delivery_datetime'] as String),
+        deliveryDatetime: _parseDate(json['delivery_datetime']),
         deliveryFeeCharged: (json['delivery_fee_charged'] as num?)?.toDouble(),
         promoCode: json['promo_code'] as String?,
         discountAmount: (json['discount_amount'] as num?)?.toDouble(),
-        bookingTimestamp: json['booking_timestamp'] == null
-            ? null
-            : DateTime.tryParse(json['booking_timestamp'] as String),
+        bookingTimestamp: _parseDate(json['booking_timestamp']),
         washerNumber: json['washer_number'] as int?,
         dryerNumber: json['dryer_number'] as int?,
         declineReason: json['decline_reason'] as String?,
         paymentMethod: json['payment_method'] as String?,
         paymentStatus: json['payment_status'] as String?,
-        paidAt: json['paid_at'] == null
-            ? null
-            : DateTime.tryParse(json['paid_at'] as String),
+        paidAt: _parseDate(json['paid_at']),
         proofOfPaymentUrl: json['proof_of_payment_url'] as String?,
         paymentRejectionReason: json['payment_rejection_reason'] as String?,
         referenceNumber: json['reference_number'] as String?,
@@ -353,38 +358,22 @@ class Booking {
         finalWeight: (json['final_weight'] as num?)?.toDouble(),
         finalPrice: (json['final_price'] as num?)?.toDouble(),
         weighingAddonCharges: (json['weighing_addon_charges'] as num?)?.toDouble(),
-        weighedAt: json['weighed_at'] == null
-            ? null
-            : DateTime.tryParse(json['weighed_at'] as String),
-        createdAt: json['created_at'] == null
-            ? null
-            : DateTime.tryParse(json['created_at'] as String),
-        startedAt: json['started_at'] == null
-            ? null
-            : DateTime.tryParse(json['started_at'] as String),
-        readyAt: json['ready_at'] == null
-            ? null
-            : DateTime.tryParse(json['ready_at'] as String),
-        completedAt: json['completed_at'] == null
-            ? null
-            : DateTime.tryParse(json['completed_at'] as String),
-        estimatedCompletionTime: json['estimated_completion_time'] == null
-            ? null
-            : DateTime.tryParse(json['estimated_completion_time'] as String),
+        weighedAt: _parseDate(json['weighed_at']),
+        createdAt: _parseDate(json['created_at']),
+        startedAt: _parseDate(json['started_at']),
+        readyAt: _parseDate(json['ready_at']),
+        completedAt: _parseDate(json['completed_at']),
+        estimatedCompletionTime: _parseDate(json['estimated_completion_time']),
         deliveryAddressId: json['delivery_address_id'] as int?,
         deliveryAddressLine: json['delivery_address_line'] as String?,
         deliveryLatitude: (json['delivery_latitude'] as num?)?.toDouble(),
         deliveryLongitude: (json['delivery_longitude'] as num?)?.toDouble(),
         pickupRiderName: json['pickup_rider_name'] as String?,
         pickupRiderContact: json['pickup_rider_contact'] as String?,
-        pickupRiderAssignedAt: json['pickup_rider_assigned_at'] == null
-            ? null
-            : DateTime.tryParse(json['pickup_rider_assigned_at'] as String),
+        pickupRiderAssignedAt: _parseDate(json['pickup_rider_assigned_at']),
         deliveryRiderName: json['delivery_rider_name'] as String?,
         deliveryRiderContact: json['delivery_rider_contact'] as String?,
-        deliveryRiderAssignedAt: json['delivery_rider_assigned_at'] == null
-            ? null
-            : DateTime.tryParse(json['delivery_rider_assigned_at'] as String),
+        deliveryRiderAssignedAt: _parseDate(json['delivery_rider_assigned_at']),
         machineAssignments: (json['machine_assignments'] as List<dynamic>?)
                 ?.map((e) => BookingMachineAssignment.fromJson(e as Map<String, dynamic>))
                 .toList() ??

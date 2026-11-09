@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/address.dart';
+import '../models/blocked_date.dart';
 import '../models/shop.dart';
 import '../services/address_service.dart';
 import '../services/api_service.dart';
 import '../services/booking_service.dart';
+import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/time_window_selector.dart';
 import 'booking_confirmation_page.dart';
@@ -34,6 +36,12 @@ class _BookingFormPageState extends State<BookingFormPage> {
   final _formKey = GlobalKey<FormState>();
   final BookingService _bookingService = BookingService();
   final AddressService _addressService = AddressService();
+  final ShopService _shopService = ShopService();
+
+  /// NEW (Fully Booked dates) — mga petsang fully booked ng shop. Hindi
+  /// mapipili sa date picker. Kung hindi ma-load, bakante lang (ang
+  /// backend pa rin ang magre-reject).
+  BlockedDateSet _blockedDates = const BlockedDateSet.empty();
 
   final _quantityController = TextEditingController(text: '1');
   final _instructionsController = TextEditingController();
@@ -87,6 +95,17 @@ class _BookingFormPageState extends State<BookingFormPage> {
   void initState() {
     super.initState();
     _quantityController.addListener(_scheduleQuantityRecheck);
+    _loadBlockedDates();
+  }
+
+  Future<void> _loadBlockedDates() async {
+    try {
+      final items = await _shopService.getBlockedDates(widget.shop.id);
+      if (!mounted) return;
+      setState(() => _blockedDates = BlockedDateSet(items));
+    } catch (_) {
+      // Tahimik lang — backend guard pa rin ang huling depensa.
+    }
   }
 
   @override
@@ -233,11 +252,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
   /// drop-off (optional). Nagbabalik ng null kung na-cancel.
   Future<DateTime?> _pickDateTime() async {
     final now = DateTime.now();
+    final lastDate = now.add(const Duration(days: 30));
+
+    // Ang initialDate ay DAPAT puwedeng piliin (hindi fully booked).
+    final initialDate = _blockedDates.firstSelectable(now.add(const Duration(hours: 1)), lastDate);
+    if (initialDate == null) {
+      setState(() => _errorMessage =
+          'This shop is fully booked for the next 30 days. Please try again later or contact the shop.');
+      return null;
+    }
+
     final date = await showDatePicker(
       context: context,
-      initialDate: now.add(const Duration(hours: 1)),
+      initialDate: initialDate,
       firstDate: now,
-      lastDate: now.add(const Duration(days: 30)),
+      lastDate: lastDate,
+      // Naka-grey at hindi mapipili ang mga fully booked na petsa.
+      selectableDayPredicate: (day) => !_blockedDates.isBlocked(day),
     );
     if (date == null || !mounted) return null;
 
@@ -428,6 +459,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 onTap: _pickDropoffDateTime,
                 onClear: _dropoffDatetime == null ? null : () => setState(() => _dropoffDatetime = null),
               ),
+              if (!_blockedDates.isEmpty) const _FullyBookedHint(),
               const SizedBox(height: 10),
               const _FieldLabel('Preferred time window (optional)'),
               TimeWindowSelector(
@@ -450,6 +482,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 icon: Icons.event_outlined,
                 onTap: _pickPickupDateTime,
               ),
+              if (!_blockedDates.isEmpty) const _FullyBookedHint(),
               const SizedBox(height: 10),
               const _FieldLabel('Preferred time window (optional)'),
               TimeWindowSelector(
@@ -677,6 +710,33 @@ class _BookingFormPageState extends State<BookingFormPage> {
     final period = dt.hour >= 12 ? 'PM' : 'AM';
     final minute = dt.minute.toString().padLeft(2, '0');
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour12:$minute $period';
+  }
+}
+
+/// NEW (Fully Booked dates) — maliit na paalala sa ilalim ng date field
+/// kapag may mga petsang fully booked ang shop.
+class _FullyBookedHint extends StatelessWidget {
+  const _FullyBookedHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.event_busy_rounded, size: 13, color: colors.textMuted),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              "Fully booked dates can't be selected.",
+              style: TextStyle(fontSize: 11.5, color: colors.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

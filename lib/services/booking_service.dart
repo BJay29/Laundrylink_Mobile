@@ -17,6 +17,14 @@ import 'customer_session.dart';
 /// bagay.
 const Object kUnset = Object();
 
+/// FIXED (timezone bug) — laging ipinapadala ang datetime sa backend
+/// bilang UTC (may "Z" sa dulo). Dati, `toIso8601String()` ng LOCAL
+/// DateTime ay WALANG timezone (hal. "2026-11-03T14:30:00"), kaya
+/// hindi alam ng backend kung anong timezone iyon at itinuturing itong
+/// UTC — resulta, 2:30 PM na pinili ng customer ay lumalabas na
+/// 10:30 PM sa web dashboard (Manila, UTC+8).
+String _toApiDateTime(DateTime dt) => dt.toUtc().toIso8601String();
+
 /// Customer (mobile app) booking endpoints.
 ///
 /// Requires the customer to be logged in — both POST /bookings/customer
@@ -80,8 +88,8 @@ class BookingService {
       'payment_method': paymentMethod,
       if (specialInstructions != null && specialInstructions.trim().isNotEmpty)
         'special_instructions': specialInstructions.trim(),
-      if (pickupDatetime != null) 'pickup_datetime': pickupDatetime.toIso8601String(),
-      if (dropoffDatetime != null) 'dropoff_datetime': dropoffDatetime.toIso8601String(),
+      if (pickupDatetime != null) 'pickup_datetime': _toApiDateTime(pickupDatetime),
+      if (dropoffDatetime != null) 'dropoff_datetime': _toApiDateTime(dropoffDatetime),
       if (dropoffWindow != null) 'dropoff_window': dropoffWindow,
       if (pickupWindow != null) 'pickup_window': pickupWindow,
       if (addressId != null) 'address_id': addressId,
@@ -200,13 +208,15 @@ class BookingService {
     final body = <String, dynamic>{};
 
     if (!identical(dropoffDatetime, kUnset)) {
-      body['dropoff_datetime'] = dropoffDatetime == null ? null : (dropoffDatetime as DateTime).toIso8601String();
+      body['dropoff_datetime'] =
+          dropoffDatetime == null ? null : _toApiDateTime(dropoffDatetime as DateTime);
     }
     if (!identical(dropoffWindow, kUnset)) {
       body['dropoff_window'] = dropoffWindow as String?;
     }
     if (!identical(pickupDatetime, kUnset)) {
-      body['pickup_datetime'] = pickupDatetime == null ? null : (pickupDatetime as DateTime).toIso8601String();
+      body['pickup_datetime'] =
+          pickupDatetime == null ? null : _toApiDateTime(pickupDatetime as DateTime);
     }
     if (!identical(pickupWindow, kUnset)) {
       body['pickup_window'] = pickupWindow as String?;
@@ -260,7 +270,9 @@ class BookingService {
 
     final body = <String, dynamic>{
       'proof_of_payment_url': proofOfPaymentUrl,
-      'reference_number': referenceNumber.trim().toUpperCase(),
+      // Tanggalin ang espasyo/tuldok/underscore (hal. "1234 567 890123")
+      // para tumugma sa format na tinatanggap ng backend.
+      'reference_number': referenceNumber.replaceAll(RegExp(r'[\s._]+'), '').toUpperCase(),
     };
 
     final data = await _api.patch(

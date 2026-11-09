@@ -103,6 +103,9 @@ class Shop {
     this.services = const [],
     this.addOns = const [],
     this.qrCodeUrl,
+    this.paymentChannel,
+    this.paymentAccountName,
+    this.paymentAccountNumber,
     this.activePromos = const [],
     this.acceptsCash = true,
     this.acceptsCod = false,
@@ -151,6 +154,18 @@ class Shop {
   /// ba" toggle. Parehong kailangan (`acceptsOnline && qrCodeUrl !=
   /// null`) bago ipakita bilang available ang online payment.
   final String? qrCodeUrl;
+
+  /// NEW (Payment Settings) — text fallback kapag hindi ma-scan o hindi
+  /// mag-load ang QR image. Lahat nullable (lumang shop = walang laman).
+  /// Channel: "GCash" | "Maya" | "Bank Transfer" | "Others".
+  final String? paymentChannel;
+  final String? paymentAccountName;
+  final String? paymentAccountNumber;
+
+  /// True kung may kahit anong text fallback na mai-display.
+  bool get hasPaymentDetails =>
+      (paymentAccountNumber?.isNotEmpty ?? false) ||
+      (paymentAccountName?.isNotEmpty ?? false);
 
   /// NEW (Home page promo carousel) — currently-active promo codes for
   /// this shop, populated on BOTH GET /shops/ (listing) and
@@ -209,6 +224,9 @@ class Shop {
                 .map((a) => AddOnItem.fromJson(a as Map<String, dynamic>))
                 .toList(),
         qrCodeUrl: json['qr_code_url'] as String?,
+        paymentChannel: json['payment_channel'] as String?,
+        paymentAccountName: json['payment_account_name'] as String?,
+        paymentAccountNumber: json['payment_account_number'] as String?,
         activePromos: json['active_promos'] == null
             ? const []
             : (json['active_promos'] as List<dynamic>)

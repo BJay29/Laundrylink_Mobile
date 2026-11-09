@@ -5,6 +5,11 @@
 ///
 /// Falls back to a plain date once it's more than a week old, since
 /// "9d ago" / "23d ago" stops being a useful unit at that point.
+///
+/// FIXED (timezone): ang mga DateTime galing backend ay maaaring UTC.
+/// Ang `difference()` ay tama na kahit UTC vs local, pero ang
+/// `month`/`day`/`year` sa fallback date ay UTC kapag hindi
+/// kino-convert — kaya `.toLocal()` muna bago basahin.
 String formatTimeAgo(DateTime? dateTime) {
   if (dateTime == null) return '';
 
@@ -19,5 +24,6 @@ String formatTimeAgo(DateTime? dateTime) {
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
-  return '${months[dateTime.month - 1]} ${dateTime.day}, ${dateTime.year}';
+  final local = dateTime.toLocal();
+  return '${months[local.month - 1]} ${local.day}, ${local.year}';
 }

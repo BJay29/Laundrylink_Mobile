@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/address.dart';
+import '../models/blocked_date.dart';
 import '../models/booking.dart';
 import '../models/shop.dart';
 import '../services/address_service.dart';
 import '../services/api_service.dart';
 import '../services/booking_service.dart';
+import '../services/shop_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/time_window_selector.dart';
 import 'saved_addresses_page.dart';
@@ -24,6 +26,10 @@ import 'saved_addresses_page.dart';
 /// Mga hindi maaaring baguhin dito: fulfillment mode, quantity, add-ons,
 /// promo code — nakakaapekto ang mga ito sa presyo, at ang presyo ay
 /// hawak na ng weighing/finalize flow ng shop.
+///
+/// UPDATED (timezone fix): `.toLocal()` ang ginagamit sa initial
+/// datetimes at sa pag-format, para laging local time ng device ang
+/// ipinapakita — kahit UTC ang dumating mula sa backend.
 class EditBookingPage extends StatefulWidget {
   const EditBookingPage({super.key, required this.booking, this.shop});
 
@@ -37,6 +43,10 @@ class EditBookingPage extends StatefulWidget {
 class _EditBookingPageState extends State<EditBookingPage> {
   final BookingService _bookingService = BookingService();
   final AddressService _addressService = AddressService();
+  final ShopService _shopService = ShopService();
+
+  /// NEW (Fully Booked dates) — hindi mapipili sa date picker.
+  BlockedDateSet _blockedDates = const BlockedDateSet.empty();
 
   late final TextEditingController _instructionsController;
 
@@ -67,15 +77,30 @@ class _EditBookingPageState extends State<EditBookingPage> {
     super.initState();
     final b = widget.booking;
     _instructionsController = TextEditingController(text: b.specialInstructions ?? '');
-    _dropoffDatetime = b.dropoffDatetime;
+    _dropoffDatetime = b.dropoffDatetime?.toLocal();
     _dropoffWindow = b.dropoffWindow;
-    _pickupDatetime = b.pickupDatetime;
+    _pickupDatetime = b.pickupDatetime?.toLocal();
     _pickupWindow = b.pickupWindow;
     _selectedAddressId = b.deliveryAddressId;
     _paymentMethod = b.paymentMethod ?? (_isDelivery ? 'cod' : 'cash');
 
     if (_isDelivery && _isEditable) {
       _loadAddresses();
+    }
+    if (_isEditable) {
+      _loadBlockedDates();
+    }
+  }
+
+  Future<void> _loadBlockedDates() async {
+    final shopId = widget.shop?.id ?? widget.booking.shopId;
+    if (shopId == null) return;
+    try {
+      final items = await _shopService.getBlockedDates(shopId);
+      if (!mounted) return;
+      setState(() => _blockedDates = BlockedDateSet(items));
+    } catch (_) {
+      // Tahimik lang — backend guard pa rin ang huling depensa.
     }
   }
 
@@ -123,11 +148,24 @@ class _EditBookingPageState extends State<EditBookingPage> {
 
   Future<DateTime?> _pickDateTime(DateTime? initial) async {
     final now = DateTime.now();
+    final lastDate = now.add(const Duration(days: 30));
+
+    final preferred = (initial != null && initial.isAfter(now)) ? initial : now.add(const Duration(hours: 1));
+    // Ang initialDate ay DAPAT puwedeng piliin (hindi fully booked).
+    final initialDate = _blockedDates.firstSelectable(preferred, lastDate);
+    if (initialDate == null) {
+      setState(() => _errorMessage =
+          'This shop is fully booked for the next 30 days. Please try again later or contact the shop.');
+      return null;
+    }
+
     final date = await showDatePicker(
       context: context,
-      initialDate: (initial != null && initial.isAfter(now)) ? initial : now.add(const Duration(hours: 1)),
+      initialDate: initialDate,
       firstDate: now,
-      lastDate: now.add(const Duration(days: 30)),
+      lastDate: lastDate,
+      // Naka-grey at hindi mapipili ang mga fully booked na petsa.
+      selectableDayPredicate: (day) => !_blockedDates.isBlocked(day),
     );
     if (date == null || !mounted) return null;
 
@@ -202,7 +240,9 @@ class _EditBookingPageState extends State<EditBookingPage> {
     }
   }
 
-  String _formatDateTime(DateTime dt) {
+  String _formatDateTime(DateTime value) {
+    // FIXED (timezone): laging local time ng device ang ipinapakita.
+    final dt = value.toLocal();
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -298,6 +338,7 @@ class _EditBookingPageState extends State<EditBookingPage> {
             onTap: _pickDropoffDateTime,
             onClear: _dropoffDatetime == null ? null : () => setState(() => _dropoffDatetime = null),
           ),
+          if (!_blockedDates.isEmpty) const _FullyBookedHint(),
           const SizedBox(height: 10),
           const _FieldLabel('Preferred time window (optional)'),
           TimeWindowSelector(
@@ -314,6 +355,7 @@ class _EditBookingPageState extends State<EditBookingPage> {
             icon: Icons.event_outlined,
             onTap: _pickPickupDateTime,
           ),
+          if (!_blockedDates.isEmpty) const _FullyBookedHint(),
           const SizedBox(height: 10),
           const _FieldLabel('Preferred time window (optional)'),
           TimeWindowSelector(
@@ -523,6 +565,32 @@ class _FieldLabel extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8, left: 2),
         child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.colors.textPrimary)),
       );
+}
+
+/// NEW (Fully Booked dates) — paalala sa ilalim ng date field.
+class _FullyBookedHint extends StatelessWidget {
+  const _FullyBookedHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.event_busy_rounded, size: 13, color: colors.textMuted),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              "Fully booked dates can't be selected.",
+              style: TextStyle(fontSize: 11.5, color: colors.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DateTimeRow extends StatelessWidget {

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/booking.dart';
@@ -18,10 +19,18 @@ import '../theme/app_colors.dart';
 const Set<String> _kAllowedReceiptExtensions = {'jpg', 'jpeg', 'png'};
 
 /// Format rule mirrored from the backend's REFERENCE_NUMBER_PATTERN
-/// (schemas.py): 6-20 characters, letters/numbers/dashes only. Kept
-/// deliberately loose since the shop may accept GCash, Maya, or bank
-/// transfer reference numbers — the backend remains the source of truth.
-final RegExp _kReferenceNumberPattern = RegExp(r'^[A-Za-z0-9-]{6,20}$');
+/// (schemas.py): 6-30 characters, letters/numbers/dashes only — PAGKATAPOS
+/// tanggalin ang mga espasyo, tuldok, at underscore (see
+/// [_cleanReference]). Kept deliberately loose since the shop may accept
+/// GCash, Maya, or bank transfer reference numbers — the backend remains
+/// the source of truth.
+final RegExp _kReferenceNumberPattern = RegExp(r'^[A-Za-z0-9-]{6,30}$');
+
+/// UPDATED (reference number with spaces): pinapayagan na ang espasyo,
+/// tuldok, at underscore sa pagta-type (hal. GCash na naka-group na
+/// "1234 567 890123"). Tinatanggal ang mga ito bago i-validate at bago
+/// ipadala sa backend, kaya iisa ang anyo ng reference sa database.
+String _cleanReference(String value) => value.replaceAll(RegExp(r'[\s._]+'), '').toUpperCase();
 
 /// Opens the payment action bottom sheet for a booking sitting at
 /// "Awaiting Payment" (price already finalized by the shop). Called
@@ -297,6 +306,56 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
     });
   }
 
+  /// NEW (Payment Settings) — text fallback card: channel, account name,
+  /// account number, may copy-to-clipboard para sa number.
+  Widget _buildPaymentDetailsCard(dynamic colors) {
+    final shop = _shop!;
+    final number = shop.paymentAccountNumber;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: colors.chipBg, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Or send manually${(shop.paymentChannel?.isNotEmpty ?? false) ? ' via ${shop.paymentChannel}' : ''}',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: colors.textSecondary),
+                ),
+                if (shop.paymentAccountName?.isNotEmpty ?? false) ...[
+                  const SizedBox(height: 4),
+                  Text(shop.paymentAccountName!,
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: colors.textPrimary)),
+                ],
+                if (number != null && number.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(number,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: colors.primary)),
+                ],
+              ],
+            ),
+          ),
+          if (number != null && number.isNotEmpty)
+            IconButton(
+              tooltip: 'Copy number',
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: number));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Account number copied'), duration: Duration(seconds: 2)),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveQrToGallery(String qrUrl) async {
     try {
       await _uploadService.saveNetworkImageToGallery(qrUrl);
@@ -319,6 +378,9 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
     final image = _selectedProofImage;
     if (bookingId == null || image == null) return;
     if (_submitting) return;
+    // Burahin ang lumang error (hal. "Fraud Alert" mula sa naunang
+    // pagsubok) bago mag-validate ulit.
+    setState(() => _errorMessage = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() {
@@ -326,7 +388,8 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
       _errorMessage = null;
     });
 
-    final referenceNumber = _referenceController.text.trim().toUpperCase();
+    // UPDATED: tinatanggal ang espasyo/tuldok/underscore bago ipadala.
+    final referenceNumber = _cleanReference(_referenceController.text);
 
     try {
       final proofUrl = await _uploadService.uploadPaymentProof(imageFile: image, bookingId: bookingId);
@@ -413,7 +476,7 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
           const SizedBox(height: 6),
           if (_loadingShop)
             const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 14), child: CircularProgressIndicator()))
-          else if (_shop?.qrCodeUrl == null)
+          else if (_shop?.qrCodeUrl == null && !(_shop?.hasPaymentDetails ?? false))
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: colors.warningBg, borderRadius: BorderRadius.circular(12)),
@@ -423,25 +486,49 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
               ),
             )
           else ...[
-            Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(_shop!.qrCodeUrl!, width: 130, height: 130, fit: BoxFit.contain),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Center(
-              child: TextButton.icon(
-                onPressed: () => _saveQrToGallery(_shop!.qrCodeUrl!),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            if (_shop?.qrCodeUrl != null) ...[
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 130,
+                    height: 130,
+                    child: Image.network(
+                      _shop!.qrCodeUrl!,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (context, child, progress) => progress == null
+                          ? child
+                          : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      // Kapag hindi mag-load ang QR, text details na lang.
+                      errorBuilder: (context, error, stack) => Container(
+                        color: colors.chipBg,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'QR unavailable.\nUse the details below.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 11, color: colors.warning),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-                icon: const Icon(Icons.download_rounded, size: 16),
-                label: const Text('Save QR to Gallery', style: TextStyle(fontSize: 12.5)),
               ),
-            ),
+              const SizedBox(height: 2),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => _saveQrToGallery(_shop!.qrCodeUrl!),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: const Text('Save QR to Gallery', style: TextStyle(fontSize: 12.5)),
+                ),
+              ),
+            ],
+            if (_shop?.hasPaymentDetails ?? false) _buildPaymentDetailsCard(colors),
           ],
 
           const SizedBox(height: 12),
@@ -452,8 +539,15 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
             controller: _referenceController,
             enabled: !_submitting,
             textCapitalization: TextCapitalization.characters,
+            // UPDATED: pinapayagan ang letra, numero, espasyo, dash,
+            // tuldok, at underscore. Mas mahaba ang limit (30) para
+            // magkasya ang mga espasyo — nililinis ito bago ipadala.
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 \-._]')),
+              LengthLimitingTextInputFormatter(40),
+            ],
             decoration: InputDecoration(
-              hintText: 'e.g. 1234567890123',
+              hintText: 'e.g. 1234 567 890123',
               hintStyle: TextStyle(color: colors.textMuted, fontSize: 13),
               filled: true,
               fillColor: colors.surface,
@@ -465,17 +559,17 @@ class _OnlinePaymentFlowState extends State<_OnlinePaymentFlow> {
               errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: colors.error)),
             ),
             validator: (value) {
-              final cleaned = (value ?? '').trim();
+              final cleaned = _cleanReference(value ?? '');
               if (cleaned.isEmpty) return 'Please enter the reference number from your receipt.';
               if (!_kReferenceNumberPattern.hasMatch(cleaned)) {
-                return 'Enter 6–20 letters/numbers from your receipt (no spaces).';
+                return 'Enter 6–30 letters/numbers from your receipt.';
               }
               return null;
             },
           ),
           const SizedBox(height: 4),
           Text(
-            'Find this on your GCash/Maya/bank receipt — usually labeled "Ref No." or "Transaction ID".',
+            'Copy it as shown on your GCash/Maya/bank receipt ("Ref No." or "Transaction ID"). Spaces are okay.',
             style: TextStyle(fontSize: 10.5, color: colors.textMuted, height: 1.3),
           ),
 
