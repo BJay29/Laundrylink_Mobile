@@ -18,6 +18,15 @@ class AuthService {
     required String password,
     required String mobileNumber,
   }) async {
+    // UPDATED (wrong-account fix): burahin muna ang natirang session at
+    // naka-cache na customer ng dating naka-login na account, para hindi
+    // ito ang mabuksan pagkatapos mag-register ng bago.
+    try {
+      await CustomerSession.instance.logout();
+    } catch (_) {
+      // Walang problema kung walang session o offline — ituloy ang signUp.
+    }
+
     await supabase.auth.signUp(
       email: email,
       password: password,

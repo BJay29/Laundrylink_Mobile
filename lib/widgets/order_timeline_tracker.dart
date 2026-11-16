@@ -32,7 +32,10 @@ class OrderTimelineTracker extends StatelessWidget {
       ),
     ];
 
-    if (isDelivery) {
+    // Na-switch mula drop-off: nasa shop na ang laundry, walang pickup leg.
+    final switched = booking.switchedToDeliveryAt != null;
+
+    if (isDelivery && !switched) {
       nodes.add(_Node(
         title: 'Courier Assigned for Pick-up',
         description: booking.pickupRiderName != null
@@ -74,6 +77,18 @@ class OrderTimelineTracker extends StatelessWidget {
       ));
     }
 
+    // NEW (Switch to Delivery) — ang customer mismo ang nagpalit mula
+    // drop-off papuntang delivery.
+    if (switched) {
+      nodes.add(_Node(
+        title: 'Delivery Requested',
+        description: booking.deliveryAddressLine != null
+            ? 'Switched to delivery — ${booking.deliveryAddressLine}'
+            : 'You switched this order to delivery.',
+        timestamp: booking.switchedToDeliveryAt,
+      ));
+    }
+
     nodes.add(_Node(
       title: 'Washing & Drying In Progress',
       description: 'Your laundry is currently being cleaned.',
@@ -86,11 +101,19 @@ class OrderTimelineTracker extends StatelessWidget {
 
     if (isDelivery) {
       nodes.add(_Node(
-        title: 'Ready — Rider Returning',
+        title: 'Ready for Delivery',
         description: booking.deliveryRiderName != null
-            ? '${booking.deliveryRiderName} is on the way to deliver your fresh laundry.'
+            ? '${booking.deliveryRiderName} will deliver your fresh laundry.'
             : 'Your laundry is ready and waiting for a delivery rider.',
         timestamp: booking.readyAt,
+        riderName: booking.deliveryRiderName,
+        riderContact: booking.deliveryRiderContact,
+      ));
+      // NEW (Out for Delivery)
+      nodes.add(_Node(
+        title: 'Out for Delivery',
+        description: 'Your rider is on the way with your fresh laundry.',
+        timestamp: booking.outForDeliveryAt,
         riderName: booking.deliveryRiderName,
         riderContact: booking.deliveryRiderContact,
       ));

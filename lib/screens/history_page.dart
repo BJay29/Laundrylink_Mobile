@@ -262,6 +262,8 @@ class _BookingHistoryCard extends StatelessWidget {
         return _StatusStyle(bg: colors.statusInProgressBg, fg: colors.statusInProgress);
       case BookingStatus.ready:
         return _StatusStyle(bg: colors.statusReadyBg, fg: colors.statusReady);
+      case BookingStatus.outForDelivery:
+        return _StatusStyle(bg: colors.statusReadyBg, fg: colors.statusReady);
       case BookingStatus.claimed:
         return _StatusStyle(bg: colors.successBg, fg: colors.success);
       case BookingStatus.cancelled:

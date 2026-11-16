@@ -3,22 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/customer.dart';
 import '../services/auth_service.dart';
-import '../services/customer_session.dart';
 import '../theme/app_colors.dart';
 import '../widgets/illustrated_icon.dart';
 import 'login_page.dart';
-import 'main_nav_page.dart';
 
 /// Verify-OTP screen — ipinapakita pagkatapos mag-signUp(). Kinukuha
 /// ang 6-digit code na ipinadala ni Supabase sa email, tapos
 /// kino-confirm via AuthService().verifyOtp().
 ///
-/// Pagkatapos ng successful verify, may posibleng maliit na delay bago
-/// makita ang naka-sync na Customer profile sa Aiven DB (kailangan pang
-/// mag-fire ang Database Webhook at tapusin ang sync) — kaya may
-/// retry loop dito bago tuluyang mag-navigate.
+/// UPDATED: pagkatapos ng successful verify, SINISIGN-OUT muna ang
+/// session na ginawa ng verifyOtp (para walang matirang account sa
+/// device), tapos dinadala ang user sa LoginPage na nakasulat na ang
+/// verified na email — password na lang ang ilalagay. Wala nang
+/// auto-direct sa Home, kaya hindi na rin mabubuksan ang maling account.
 ///
 /// UPDATED (bug fix) — pinalitan ang _TapScale para gumamit ng Listener
 /// (raw pointer lang, hindi tap-gesture recognizer) sa halip na
@@ -109,35 +107,18 @@ class _VerifyOtpPageState extends State<VerifyOtpPage> with TickerProviderStateM
     try {
       await AuthService().verifyOtp(email: widget.email, code: code);
 
-      if (!mounted) return;
-      setState(() {
-        _verifying = false;
-        _syncing = true;
-      });
-
-      Customer? customer;
-      for (var attempt = 0; attempt < 4 && customer == null; attempt++) {
-        if (attempt > 0) await Future.delayed(const Duration(milliseconds: 1500));
-        await CustomerSession.instance.restoreSession();
-        customer = CustomerSession.instance.customer;
-      }
+      // Burahin ang session na ginawa ng verifyOtp — manual login ang
+      // susunod na hakbang para siguradong tamang account ang bubukas.
+      await AuthService().logout();
 
       if (!mounted) return;
-      setState(() => _syncing = false);
+      setState(() => _verifying = false);
 
-      if (customer != null) {
-        _message('Email verified!', success: true);
-        Navigator.of(context).pushAndRemoveUntil(
-          _fadeSlideRoute(MainNavPage(customer: customer!)),
-          (route) => false,
-        );
-      } else {
-        _message('Verified! Please sign in — this may take a moment to finish syncing.', success: true);
-        Navigator.of(context).pushAndRemoveUntil(
-          _fadeSlideRoute(LoginPage(prefilledEmail: widget.email)),
-          (route) => false,
-        );
-      }
+      _message('Email verified! Please sign in to continue.', success: true);
+      Navigator.of(context).pushAndRemoveUntil(
+        _fadeSlideRoute(LoginPage(prefilledEmail: widget.email)),
+        (route) => false,
+      );
     } catch (error) {
       if (mounted) {
         setState(() {

@@ -235,6 +235,19 @@ class _ShopListTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                   ),
+                  if (shop.hoursLabel != null) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 12, color: colors.textMuted),
+                        const SizedBox(width: 4),
+                        Text(
+                          shop.hoursLabel!,
+                          style: TextStyle(fontSize: 11.5, color: colors.textMuted),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   // UPDATED (Rating after order) — Wrap (dating Row) para
                   // hindi mag-overflow sa makikitid na screen kapag
@@ -245,7 +258,7 @@ class _ShopListTile extends StatelessWidget {
                     runSpacing: 6,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      _StatusBadge(isOnline: shop.isOnline),
+                      _StatusBadge(isOnline: shop.isOnline, closedReason: shop.closedReason),
                       if (shop.distanceKm != null)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -285,15 +298,28 @@ class _ShopListTile extends StatelessWidget {
 }
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.isOnline});
+  const _StatusBadge({required this.isOnline, this.closedReason});
   final bool isOnline;
+  final String? closedReason;
+
+  // Bakit sarado: paused (manual), outside_hours, offline (walang terminal).
+  String get _closedLabel {
+    switch (closedReason) {
+      case 'paused':
+        return 'Not accepting';
+      case 'outside_hours':
+        return 'Closed now';
+      default:
+        return 'Closed';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final Color fg = isOnline ? colors.success : colors.neutral;
     final Color bg = isOnline ? colors.successBg : colors.neutralBg;
-    final String label = isOnline ? 'Open' : 'Closed';
+    final String label = isOnline ? 'Open' : _closedLabel;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),

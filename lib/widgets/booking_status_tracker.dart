@@ -173,6 +173,14 @@ class _NonLinearStatusCard extends StatelessWidget {
           fgColor: colors.warning,
           message: 'Ready for payment',
         );
+      // NEW (Out for Delivery) — nasa daan na ang rider.
+      case BookingStatus.outForDelivery:
+        return _NonLinearStatusConfig(
+          icon: Icons.delivery_dining_rounded,
+          bgColor: colors.chipBg,
+          fgColor: colors.primary,
+          message: 'Out for delivery',
+        );
       case BookingStatus.cancelled:
         return _NonLinearStatusConfig(
           icon: Icons.cancel_outlined,

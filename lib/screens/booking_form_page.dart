@@ -70,6 +70,12 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool _submitting = false;
   String? _errorMessage;
 
+  /// NEW (Shop Status) — live na status ng shop. Nagsisimula sa galing sa
+  /// listahan, tapos nire-refresh pagbukas ng form (at bago mag-submit)
+  /// para hindi mabigla ang customer ng error pagkatapos punan ang form.
+  late bool _shopOpen = widget.shop.isOnline;
+  late String? _closedReason = widget.shop.closedReason;
+
   /// Result of the last successful/attempted promo preview call, or
   /// null if no code has been checked yet. Drives the live discount row
   /// in _PriceSummary.
@@ -96,6 +102,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
     super.initState();
     _quantityController.addListener(_scheduleQuantityRecheck);
     _loadBlockedDates();
+    _refreshShopStatus();
+  }
+
+  /// NEW (Shop Status) — kunin ang pinakabagong open/closed. Tahimik kapag
+  /// pumalya (ang backend pa rin ang huling depensa sa pag-submit).
+  Future<bool> _refreshShopStatus() async {
+    try {
+      final fresh = await _shopService.getShopDetail(widget.shop.id);
+      if (!mounted) return fresh.isOnline;
+      setState(() {
+        _shopOpen = fresh.isOnline;
+        _closedReason = fresh.closedReason;
+      });
+      return fresh.isOnline;
+    } catch (_) {
+      return _shopOpen;
+    }
   }
 
   Future<void> _loadBlockedDates() async {
@@ -298,6 +321,20 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
     if (!_formKey.currentState!.validate()) return;
 
+    // NEW (Shop Status) — i-check ulit bago mag-submit; baka nagsara ang shop
+    // habang pinupunan ang form.
+    setState(() => _submitting = true);
+    final stillOpen = await _refreshShopStatus();
+    if (!mounted) return;
+    if (!stillOpen) {
+      setState(() {
+        _submitting = false;
+        _errorMessage = _closedReason ?? 'This shop is closed right now. Please try again later.';
+      });
+      return;
+    }
+    setState(() => _submitting = false);
+
     if (_fulfillmentMode == 'delivery' && _pickupDatetime == null) {
       setState(() => _errorMessage = 'Please choose a pickup date and time for delivery.');
       return;
@@ -377,6 +414,11 @@ class _BookingFormPageState extends State<BookingFormPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           children: [
+            // NEW (Shop Status) — paliwanag kung bakit hindi makakapag-book.
+            if (!_shopOpen) ...[
+              _ClosedShopBanner(reason: _closedReason, hours: widget.shop.hoursLabel),
+              const SizedBox(height: 14),
+            ],
             _SectionCard(
               title: widget.service.name,
               subtitle: widget.shop.shopName,
@@ -644,7 +686,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                   ],
                 ),
                 child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
+                  onPressed: (_submitting || !_shopOpen) ? null : _submit,
                   style: FilledButton.styleFrom(
                     backgroundColor: colors.primary,
                     foregroundColor: Colors.white,
@@ -657,7 +699,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
                         )
-                      : const Text('Send booking request', style: TextStyle(fontWeight: FontWeight.w700)),
+                      : Text(
+                          _shopOpen ? 'Send booking request' : 'Shop is closed',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                 ),
               ),
             ),
@@ -1377,6 +1422,54 @@ class _PriceSummary extends StatelessWidget {
           Text(
             '$sign₱${value.abs().toStringAsFixed(2)}',
             style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// NEW (Shop Status) — nagpapaliwanag kung bakit naka-disable ang
+/// "Send booking request": sarado/naka-pause/offline ang shop.
+class _ClosedShopBanner extends StatelessWidget {
+  const _ClosedShopBanner({this.reason, this.hours});
+
+  final String? reason;
+  final String? hours;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.warningBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.warning.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.storefront_outlined, size: 20, color: colors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('This shop is closed right now',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: colors.textPrimary)),
+                const SizedBox(height: 3),
+                Text(
+                  reason ?? 'Please try again once the shop is open.',
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: colors.textSecondary),
+                ),
+                if (hours != null) ...[
+                  const SizedBox(height: 3),
+                  Text('Hours: $hours', style: TextStyle(fontSize: 12, color: colors.textSecondary)),
+                ],
+              ],
+            ),
           ),
         ],
       ),

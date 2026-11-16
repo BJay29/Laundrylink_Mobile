@@ -106,7 +106,9 @@ class _LiveStatusBannerState extends State<LiveStatusBanner> with SingleTickerPr
           color: colors.primary,
           bg: colors.chipBg,
           title: 'Your laundry is being cleaned',
-          subtitle: 'Washing and drying in progress at ${b.shopName}.',
+          subtitle: isDelivery && b.deliveryRiderName != null
+              ? 'Washing and drying in progress. ${b.deliveryRiderName} will deliver it once it\'s done.'
+              : 'Washing and drying in progress at ${b.shopName}.',
           pulsing: false,
         );
 
@@ -114,13 +116,13 @@ class _LiveStatusBannerState extends State<LiveStatusBanner> with SingleTickerPr
         if (isDelivery) {
           if (b.deliveryRiderName != null) {
             return _BannerConfig(
-              icon: Icons.delivery_dining_rounded,
+              icon: Icons.inventory_2_outlined,
               color: colors.success,
               bg: colors.successBg,
-              title: '${b.deliveryRiderName} is delivering your laundry',
+              title: 'Your laundry is ready',
               subtitle: b.deliveryRiderContact != null
-                  ? 'On the way to your address · ${b.deliveryRiderContact}'
-                  : 'On the way to your address.',
+                  ? '${b.deliveryRiderName} will deliver it shortly · ${b.deliveryRiderContact}'
+                  : '${b.deliveryRiderName} will deliver it shortly.',
               pulsing: false,
             );
           }
@@ -140,6 +142,21 @@ class _LiveStatusBannerState extends State<LiveStatusBanner> with SingleTickerPr
           title: 'Ready for pickup',
           subtitle: 'Your laundry is ready at ${b.shopName}.',
           pulsing: false,
+        );
+
+      // NEW (Out for Delivery) — nasa daan na ang rider.
+      case BookingStatus.outForDelivery:
+        return _BannerConfig(
+          icon: Icons.delivery_dining_rounded,
+          color: colors.success,
+          bg: colors.successBg,
+          title: b.deliveryRiderName != null
+              ? '${b.deliveryRiderName} is delivering your laundry'
+              : 'Your laundry is on the way',
+          subtitle: b.deliveryRiderContact != null
+              ? 'On the way to your address · ${b.deliveryRiderContact}'
+              : 'On the way to your address.',
+          pulsing: true,
         );
 
       case BookingStatus.claimed:

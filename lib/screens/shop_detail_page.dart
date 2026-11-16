@@ -33,6 +33,20 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
     );
   }
 
+  String _closedMessage(Shop shop) {
+    switch (shop.closedReason) {
+      case 'paused':
+        return 'This shop has temporarily paused new bookings. You can still browse their services.';
+      case 'outside_hours':
+        final h = shop.hoursLabel;
+        return h == null
+            ? 'This shop is outside its operating hours. You can still browse their services.'
+            : 'This shop is outside its operating hours ($h). You can still browse their services.';
+      default:
+        return 'This shop is currently closed and not accepting new bookings right now. You can still browse their services.';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -58,6 +72,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
 
           final isDetailLoaded = snapshot.connectionState == ConnectionState.done && snapshot.hasData;
           final isShopOnline = shop.isOnline;
+          final closedMessage = _closedMessage(shop);
 
           return CustomScrollView(
             slivers: [
@@ -117,7 +132,19 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                         runSpacing: 8,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          _ShopStatusPill(isOnline: isShopOnline),
+                          _ShopStatusPill(isOnline: isShopOnline, closedReason: shop.closedReason),
+                          if (shop.hoursLabel != null)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.schedule_rounded, size: 14, color: colors.textSecondary),
+                                const SizedBox(width: 4),
+                                Text(
+                                  shop.hoursLabel!,
+                                  style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                                ),
+                              ],
+                            ),
                           if (RatingBadge.hasRating(shop.averageRating, shop.ratingCount))
                             RatingBadge(averageRating: shop.averageRating, ratingCount: shop.ratingCount),
                         ],
@@ -164,7 +191,7 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  'This shop is currently closed and not accepting new bookings right now. You can still browse their services.',
+                                  closedMessage,
                                   style: TextStyle(fontSize: 12.5, color: colors.error, height: 1.4),
                                 ),
                               ),
@@ -222,15 +249,18 @@ class _ShopDetailPageState extends State<ShopDetailPage> {
 }
 
 class _ShopStatusPill extends StatelessWidget {
-  const _ShopStatusPill({required this.isOnline});
+  const _ShopStatusPill({required this.isOnline, this.closedReason});
   final bool isOnline;
+  final String? closedReason;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final Color fg = isOnline ? colors.success : colors.neutral;
     final Color bg = isOnline ? colors.successBg : colors.neutralBg;
-    final String label = isOnline ? 'Open now' : 'Currently closed';
+    final String label = isOnline
+        ? 'Open now'
+        : (closedReason == 'paused' ? 'Not accepting bookings' : 'Currently closed');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

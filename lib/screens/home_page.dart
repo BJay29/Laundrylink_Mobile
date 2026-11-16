@@ -460,7 +460,7 @@ class _ShopCard extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(color: colors.neutralBg, borderRadius: BorderRadius.circular(20)),
-                              child: Text('Closed', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral)),
+                              child: Text(shop.closedReason == 'paused' ? 'Paused' : 'Closed', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colors.neutral)),
                             ),
                         ],
                       ),

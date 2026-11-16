@@ -240,6 +240,47 @@ class BookingService {
     return Booking.fromJson(data);
   }
 
+  /// NEW (Switch to Delivery) — gawing "delivery" ang sarili mong
+  /// drop-off booking pagkatapos itong ma-accept at ma-price (hal.
+  /// tapos na ang laba at gusto mo na lang ipahatid). One-way: hindi
+  /// na ito maibabalik sa drop-off.
+  ///
+  /// [addressId] — REQUIRED, id ng isa sa mga saved Address mo.
+  /// [deliveryDatetime] — OPTIONAL na preferred na petsa/oras ng
+  /// hatid; chine-check ng backend laban sa Fully Booked dates.
+  /// [deliveryWindow] — optional ("morning" | "afternoon" | "evening"
+  /// | "anytime").
+  ///
+  /// Calls POST /bookings/customer/{id}/request-delivery. Ibinabalik
+  /// ang updated Booking (fulfillment_mode == "delivery", kasama na
+  /// ang delivery fee sa total). Ang 400 ApiException na `message` ay
+  /// pwedeng ipakita nang diretso (hal. walang delivery ang shop,
+  /// hindi na pwede ang status, fully booked ang petsa).
+  Future<Booking> requestDelivery({
+    required int bookingId,
+    required int addressId,
+    DateTime? deliveryDatetime,
+    String? deliveryWindow,
+  }) async {
+    final token = CustomerSession.instance.authToken;
+    if (token == null) {
+      throw const ApiException('You must be logged in to request delivery.', statusCode: 401);
+    }
+
+    final body = <String, dynamic>{
+      'address_id': addressId,
+      if (deliveryDatetime != null) 'delivery_datetime': _toApiDateTime(deliveryDatetime),
+      if (deliveryWindow != null) 'delivery_window': deliveryWindow,
+    };
+
+    final data = await _api.post(
+      '/bookings/customer/$bookingId/request-delivery',
+      body,
+      token: token,
+    );
+    return Booking.fromJson(data);
+  }
+
   /// UPDATED (Secure Payment Verification System) — submits proof of
   /// payment for a booking that is already "Awaiting Payment" (price
   /// finalized by the shop, online payment method). The image itself

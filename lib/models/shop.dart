@@ -89,6 +89,18 @@ class PromoPreview {
       );
 }
 
+/// "08:00" -> "8:00 AM"; null kung blangko o mali.
+String? _format12h(String? hhmm) {
+  if (hhmm == null || !hhmm.contains(':')) return null;
+  final parts = hhmm.split(':');
+  final h = int.tryParse(parts[0]);
+  final m = int.tryParse(parts[1]);
+  if (h == null || m == null) return null;
+  final suffix = h < 12 ? 'AM' : 'PM';
+  final h12 = h % 12 == 0 ? 12 : h % 12;
+  return '$h12:${m.toString().padLeft(2, '0')} $suffix';
+}
+
 class Shop {
   const Shop({
     required this.id,
@@ -98,6 +110,10 @@ class Shop {
     this.longitude,
     this.distanceKm,
     this.isOnline = false,
+    this.closedReason,
+    this.acceptingBookings = true,
+    this.openingTime,
+    this.closingTime,
     this.hasDelivery = false,
     this.deliveryFee = 0.0,
     this.services = const [],
@@ -126,7 +142,32 @@ class Shop {
 
   /// Real-time na "online" status ng shop — see the earlier is_online
   /// feature notes in shop_detail_page.dart / home_page.dart.
+  ///
+  /// UPDATED (Shop Status) — ito na ang EFFECTIVE na "bukas ba para
+  /// tumanggap ng booking": galing sa `is_open` ng backend (manual
+  /// "Accepting bookings" toggle + operating hours + terminal heartbeat
+  /// na may grace period). Babalik sa lumang `is_online` kung wala pa
+  /// ang `is_open` sa response.
   final bool isOnline;
+
+  /// Customer-facing na dahilan kung sarado ("The shop is closed right
+  /// now. Open daily 8:00 AM – 8:00 PM."); null kung bukas o hindi alam.
+  final String? closedReason;
+
+  /// Manual na toggle ng shop. False = naka-pause ang booking.
+  final bool acceptingBookings;
+
+  /// Operating hours ("HH:MM", 24h, oras sa Pilipinas) — null kung walang
+  /// itinakda.
+  final String? openingTime;
+  final String? closingTime;
+
+  /// "8:00 AM – 8:00 PM" o null kung walang itinakdang oras.
+  String? get hoursLabel {
+    final o = _format12h(openingTime);
+    final c = _format12h(closingTime);
+    return (o == null || c == null) ? null : '$o – $c';
+  }
 
   /// Kung meron bang delivery option ang shop, at magkano ito.
   /// Ginagamit ng booking form para i-decide kung ipapakita ang
@@ -155,17 +196,16 @@ class Shop {
   /// null`) bago ipakita bilang available ang online payment.
   final String? qrCodeUrl;
 
-  /// NEW (Payment Settings) — text fallback kapag hindi ma-scan o hindi
-  /// mag-load ang QR image. Lahat nullable (lumang shop = walang laman).
-  /// Channel: "GCash" | "Maya" | "Bank Transfer" | "Others".
+  /// (Payment Settings) — text fallback ng QR: "GCash" | "Maya" |
+  /// "Bank Transfer" | "Others", pangalan ng account, at numero. Null
+  /// kung hindi pa nailalagay ng shop.
   final String? paymentChannel;
   final String? paymentAccountName;
   final String? paymentAccountNumber;
 
-  /// True kung may kahit anong text fallback na mai-display.
-  bool get hasPaymentDetails =>
-      (paymentAccountNumber?.isNotEmpty ?? false) ||
-      (paymentAccountName?.isNotEmpty ?? false);
+  /// True kapag may numero ng account na maipapakita bilang fallback
+  /// (para sa customer na hindi makapag-scan ng QR).
+  bool get hasPaymentDetails => paymentAccountNumber?.trim().isNotEmpty ?? false;
 
   /// NEW (Home page promo carousel) — currently-active promo codes for
   /// this shop, populated on BOTH GET /shops/ (listing) and
@@ -210,7 +250,11 @@ class Shop {
         latitude: (json['latitude'] as num?)?.toDouble(),
         longitude: (json['longitude'] as num?)?.toDouble(),
         distanceKm: (json['distance_km'] as num?)?.toDouble(),
-        isOnline: json['is_online'] as bool? ?? false,
+        isOnline: json['is_open'] as bool? ?? json['is_online'] as bool? ?? false,
+        closedReason: json['closed_reason'] as String?,
+        acceptingBookings: json['accepting_bookings'] as bool? ?? true,
+        openingTime: json['opening_time'] as String?,
+        closingTime: json['closing_time'] as String?,
         hasDelivery: json['has_delivery'] as bool? ?? false,
         deliveryFee: (json['delivery_fee'] as num?)?.toDouble() ?? 0.0,
         services: json['services'] == null

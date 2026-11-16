@@ -8,6 +8,7 @@ enum BookingStatus {
   pending,
   inProgress,
   ready,
+  outForDelivery,
   claimed,
   cancelled,
   declined,
@@ -29,6 +30,8 @@ extension BookingStatusLabel on BookingStatus {
         return 'In Progress';
       case BookingStatus.ready:
         return 'Ready for Pickup';
+      case BookingStatus.outForDelivery:
+        return 'Out for Delivery';
       case BookingStatus.claimed:
         return 'Completed';
       case BookingStatus.cancelled:
@@ -58,6 +61,8 @@ BookingStatus _statusFromApi(String? raw) {
       return BookingStatus.inProgress;
     case 'Ready':
       return BookingStatus.ready;
+    case 'Out for Delivery':
+      return BookingStatus.outForDelivery;
     case 'Claimed':
       return BookingStatus.claimed;
     case 'Cancelled':
@@ -179,6 +184,8 @@ class Booking {
     this.createdAt,
     this.startedAt,
     this.readyAt,
+    this.outForDeliveryAt,
+    this.switchedToDeliveryAt,
     this.completedAt,
     this.estimatedCompletionTime,
     this.deliveryAddressId,
@@ -266,6 +273,13 @@ class Booking {
   final DateTime? createdAt;
   final DateTime? startedAt;
   final DateTime? readyAt;
+
+  /// NEW (Out for Delivery) — kailan umalis ang rider dala ang laundry.
+  final DateTime? outForDeliveryAt;
+
+  /// NEW (Switch to Delivery) — kailan ginawang delivery ang dating
+  /// drop-off booking. Null kung orihinal na delivery o drop-off pa rin.
+  final DateTime? switchedToDeliveryAt;
   final DateTime? completedAt;
 
   /// Live countdown target, mula sa naka-assign na machine's
@@ -362,6 +376,8 @@ class Booking {
         createdAt: _parseDate(json['created_at']),
         startedAt: _parseDate(json['started_at']),
         readyAt: _parseDate(json['ready_at']),
+        outForDeliveryAt: _parseDate(json['out_for_delivery_at']),
+        switchedToDeliveryAt: _parseDate(json['switched_to_delivery_at']),
         completedAt: _parseDate(json['completed_at']),
         estimatedCompletionTime: _parseDate(json['estimated_completion_time']),
         deliveryAddressId: json['delivery_address_id'] as int?,

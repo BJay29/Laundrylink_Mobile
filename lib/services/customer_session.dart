@@ -67,11 +67,12 @@ class CustomerSession extends ChangeNotifier {
     try {
       final response = await _api.get('/customer/profile', token: token);
       _customer = Customer.fromJson(response);
-    } on ApiException {
-      // Puwedeng mangyari kung expired/invalid na pala ang session, o
-      // hindi pa na-sync ang account (webhook race condition). Ligtas
-      // na i-treat na lang bilang "hindi naka-login" sa halip na
-      // i-crash ang app pag-launch.
+    } catch (_) {
+      // UPDATED (wrong-account fix): LAHAT ng error (hindi lang
+      // ApiException) ay nagki-clear na ng naka-cache na customer, para
+      // hindi manatili ang profile ng dating account kapag pumalya ang
+      // pagkuha ng profile ng kasalukuyang session (expired/invalid na
+      // session, hindi pa na-sync ang account, o walang internet).
       _customer = null;
     } finally {
       notifyListeners();
