@@ -35,7 +35,7 @@ class VerifyOtpPage extends StatefulWidget {
 }
 
 class _VerifyOtpPageState extends State<VerifyOtpPage> with TickerProviderStateMixin {
-  static const _resendCooldownSeconds = 60;
+  static const _resendCooldownSeconds = 90; // 1 minuto at 30 segundo
 
   final _codeController = TextEditingController();
   bool _verifying = false;
@@ -71,6 +71,10 @@ class _VerifyOtpPageState extends State<VerifyOtpPage> with TickerProviderStateM
     _pulse.dispose();
     super.dispose();
   }
+
+  // 90 → "1:30", 5 → "0:05"
+  String _formatCooldown(int total) =>
+      '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')}';
 
   void _startResendCooldown() {
     setState(() => _resendSecondsLeft = _resendCooldownSeconds);
@@ -316,7 +320,7 @@ class _VerifyOtpPageState extends State<VerifyOtpPage> with TickerProviderStateM
                                         : AnimatedSwitcher(
                                             duration: const Duration(milliseconds: 200),
                                             child: Text(
-                                              _resendSecondsLeft > 0 ? 'Resend in ${_resendSecondsLeft}s' : 'Resend',
+                                              _resendSecondsLeft > 0 ? 'Resend in ${_formatCooldown(_resendSecondsLeft)}' : 'Resend',
                                               key: ValueKey(_resendSecondsLeft > 0),
                                             ),
                                           ),
